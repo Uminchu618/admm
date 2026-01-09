@@ -17,6 +17,8 @@ import argparse
 from pathlib import Path
 from typing import Optional, Sequence
 
+import pandas as pd
+
 from admm.config import load_config
 from admm.model import ADMMHazardAFT
 
@@ -53,6 +55,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # 設定辞書から推定器を構築する。
     # 余計なキーや型不一致があれば TypeError が発生し得る。
     model = ADMMHazardAFT.from_config(config)
+
+    # データを読み込み、fit を呼び出す（fit 本体は未実装のため例外はそのまま伝播する）。
+    data_path = Path("data/simulated_data.csv")
+    data = pd.read_csv(data_path)
+    required_cols = {"time", "event"}
+    if not required_cols.issubset(data.columns):
+        missing = sorted(required_cols - set(data.columns))
+        raise ValueError(f"Missing required columns in {data_path}: {missing}")
+
+    feature_cols = [col for col in data.columns if col not in {"time", "event", "time_true"}]
+    X = data[feature_cols].to_numpy()
+    y = data[["time", "event"]].to_numpy()
+    model.fit(X, y)
 
     # skeleton 段階のため、生成できたことを表示して終了する。
     print("ADMMHazardAFT skeleton initialized from config.", model)

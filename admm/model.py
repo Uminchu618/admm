@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+import numpy as np
+
 from .baseline import BaselineHazardModel, BSplineBaseline
 from .objective import HazardAFTObjective
 from .quadrature import QuadratureRule
@@ -138,8 +140,8 @@ class ADMMHazardAFT:
         # 入力検証: X と y を整形し、観測時刻 T と打ち切り指示 delta に分解する。
         X, T, delta = self._validate_inputs(X, y)
 
-        # sklearn 規約の属性: 入力次元（特徴量数）を保持する。
-        self.n_features_in_ = self._infer_n_features(X)
+        # 入力次元（特徴量数）を保持する。
+        self.n_features_in_ = int(X.shape[1])
 
         # time_grid を tuple 化して不変にし、学習後属性として保持する。
         self.time_grid_ = tuple(self.time_grid)
@@ -231,28 +233,78 @@ class ADMMHazardAFT:
     def _validate_inputs(
         self, X: ArrayLike, y: ArrayLike
     ) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
-        """入力検証と前処理（未実装）。
+        """入力検証と前処理を行い、(X, T, delta) に分解して返す。
 
-        典型的には次を行う:
-            - X を 2次元配列に整形
-            - y から観測時刻 T とイベント指示 delta（1=イベント, 0=打ち切り）を取り出す
-            - 時刻が非負であること、delta が {0,1} であること等を検証
+        本メソッドは「学習用に最低限必要な形・値の妥当性」を確認する。
+        実装は NumPy に依存し、入力を `np.asarray` で配列へ正規化する。
+
+        行う検証・変換:
+        - X:
+            - 1 次元なら (n, 1) に reshape（単一特徴量を想定）
+            - 2 次元でない場合は ValueError
+        - y:
+            - (n, 2) 形式（time, event）であることを要求
+            - time 列は float へ変換可能で、有限（NaN/inf なし）かつ非負であること
+            - event 列は 0/1 の二値であること
+              - 浮動小数の場合のみ NaN/inf を明示チェック
+              - 戻り値では int にキャストして返す
+
+        Args:
+            X: 特徴量。形状 (n, p) を想定（1 次元は (n, 1) とみなす）。
+            y: 目的変数。形状 (n, 2) を要求（1列目=観測時刻 time, 2列目=イベント指示 event）。
+
+        Returns:
+            (X_array, T, delta)
+            - X_array: 形状 (n, p) の NumPy 配列
+            - T: 形状 (n,) の float 配列（観測時刻）
+            - delta: 形状 (n,) の int 配列（0/1）
 
         Raises:
-            NotImplementedError: 現時点では未実装。
+            ValueError: 形状不正、型変換不能、NaN/inf、負の time、event が 0/1 以外、など。
         """
-        raise NotImplementedError("Input validation is not implemented yet.")
 
-    def _infer_n_features(self, X: ArrayLike) -> int:
-        """特徴量数を推定する（未実装）。
+        # X を NumPy 配列に正規化する（リスト/タプル等も受け取れるようにするため）。
+        X_array = np.asarray(X)
 
-        想定:
-            X が (n, p) なら p を返す。
+        # 1 次元入力は「単一特徴量」とみなし、(n, 1) に整形する。
+        if X_array.ndim == 1:
+            X_array = X_array.reshape(-1, 1)
+        elif X_array.ndim != 2:
+            raise ValueError("X は 2 次元配列（n, p）である必要があります。")
 
-        Raises:
-            NotImplementedError: 現時点では未実装。
-        """
-        raise NotImplementedError("Feature inference is not implemented yet.")
+        # y も NumPy 配列に正規化し、(n, 2) 形式であることを要求する。
+        # （time, event）の2列を前提に分解するため。
+        y_array = np.asarray(y)
+        if y_array.ndim != 2 or y_array.shape[1] != 2:
+            raise ValueError("y は (n, 2) 形式（time, event）である必要があります。")
+        # サンプル数（行数）が一致しない場合は、入力対応が壊れているためエラー。
+        if X_array.shape[0] != y_array.shape[0]:
+            raise ValueError("X と y の行数が一致しません。")
+        # time 列を float に変換する。変換不能（文字列等）の場合は例外を握りつぶさず原因を付与する。
+        try:
+            T = y_array[:, 0].astype(float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("y の time 列は数値である必要があります。") from exc
+        # time に NaN/inf が混じると尤度計算が破綻するため拒否する。
+        if np.any(~np.isfinite(T)):
+            raise ValueError("time に無限大または NaN が含まれています。")
+        # time は非負を要求する（負の時刻はモデル定義上不自然）。
+        if np.any(T < 0):
+            raise ValueError("time は非負である必要があります。")
+        # event 列（打ち切り指示）を取り出す。
+        # ここではまず asarray のみ行い、後段で 0/1 判定後に int へキャストして返す。
+        delta = np.asarray(y_array[:, 1])
+        # event が浮動小数の場合は、NaN/inf 混入を明示的に検出する。
+        # （整数型や bool 型の場合は isfinite が使えない/不要なケースがあるため分岐する。）
+        if delta.dtype.kind == "f" and np.any(~np.isfinite(delta)):
+            raise ValueError("event に無限大または NaN が含まれています。")
+        # event が 0/1 の二値であることを検証する。
+        # np.unique を使うことで、全要素の検査より高速に「取り得る値の集合」を確認できる。
+        unique = np.unique(delta)
+        if not np.all(np.isin(unique, [0, 1])):
+            raise ValueError("event は 0/1 の二値である必要があります。")
+        # 下流（尤度計算・最適化）で扱いやすいよう、event は int（0/1）へ正規化して返す。
+        return X_array, T, delta.astype(int)
 
     def _initialize_params(
         self, X: ArrayLike, T: ArrayLike, delta: ArrayLike
