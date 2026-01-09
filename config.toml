@@ -1,0 +1,95 @@
+# ----------------------------------------
+# ADMMHazardAFT 設定ファイル（TOML）
+#
+# 目的:
+#   推定器のハイパーパラメータを外部化し、実験の再現性と比較容易性を高める。
+#
+# 注意:
+#   - コメントは '#' で始める。
+#   - 値の型（数値/真偽/文字列/配列）は TOML の規約に従う。
+# ----------------------------------------
+
+# time_grid:
+#   時間分割の区間端点 (t0, t1, ..., tK)。
+#   β(t) を「各区間で区分一定」として表現するための基準となる。
+#   通常は単調増加（t0 < t1 < ... < tK）を満たすように設定する。
+time_grid = [0.0, 1.0]
+
+# include_intercept:
+#   切片（定数項）を β に含めるかどうか。
+#   true の場合、各時間区間で β_{0k}（切片）が入る想定。
+include_intercept = true
+
+# baseline_basis:
+#   ベースライン（基準）ハザードの基底の種類。
+#   現状の実装は "bspline" のみを想定（未対応の値は NotImplementedError になり得る）。
+baseline_basis = "bspline"
+
+# n_baseline_basis:
+#   ベースライン基底の数 M。
+#   大きいほど柔軟だが、過学習・数値不安定（ヘッセの悪条件化など）のリスクが増える。
+n_baseline_basis = 3
+
+[quadrature]
+
+# quadrature:
+#   区間積分を数値近似するための設定。
+#   近似対数尤度に含まれる積分を、求積点と重みの加重和で評価する。
+
+# Q:
+#   求積点数（式(6) の Q を想定）。
+#   大きいほど近似精度は上がるが、計算量は増える。
+Q = 5
+
+# rule:
+#   求積法の種類。
+#   現状は "gauss_legendre" を想定（他ルールは未実装の可能性あり）。
+rule = "gauss_legendre"
+
+
+# lambda_fuse:
+#   fused lasso 正則化の強さ（区間間差分 Dβ の L1 ペナルティ）。
+#   大きいほど時間方向に "段差の少ない"（変化点の少ない）β になりやすい。
+lambda_fuse = 1.0
+
+# rho:
+#   ADMM のペナルティ係数 ρ。
+#   primal/dual のバランスに影響し、収束速度・安定性が変わり得る。
+rho = 1.0
+
+# max_admm_iter:
+#   ADMM 反復の最大回数。
+max_admm_iter = 100
+
+# admm_tol_primal:
+#   primal residual の収束閾値。
+#   一般に ||Dβ - z|| に関連する残差がこの閾値以下で収束とみなす。
+admm_tol_primal = 1e-4
+
+# admm_tol_dual:
+#   dual residual の収束閾値。
+#   一般に ||ρ D^T (z^{k} - z^{k-1})|| に関連する残差がこの閾値以下で収束とみなす。
+admm_tol_dual = 1e-4
+
+# newton_steps_per_admm:
+#   ADMM の (β,γ) 更新で行う Newton ステップ数（inexact Newton の制御）。
+#   1 にすると "毎回少しだけ Newton して次の ADMM 反復へ" という方針になる。
+newton_steps_per_admm = 1
+
+# max_newton_iter:
+#   (β,γ) 更新の Newton 反復の最大回数。
+max_newton_iter = 3
+
+# newton_tol:
+#   Newton 法の収束判定閾値（勾配ノルムや更新量などの基準に使う想定）。
+newton_tol = 1e-6
+
+# clip_eta:
+#   exp(η) の発散（overflow）を避けるためのクリッピング幅。
+#   典型的には η を [-clip_eta, clip_eta] に制限して計算を安定化させる。
+clip_eta = 20.0
+
+# random_state:
+#   初期値生成などで乱数を使う場合のシード。
+#   再現性を確保するため、実験では固定値を推奨。
+random_state = 1234
