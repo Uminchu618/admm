@@ -309,7 +309,7 @@ class ADMMHazardAFT:
     def _initialize_params(
         self, X: ArrayLike, T: ArrayLike, delta: ArrayLike
     ) -> Tuple[ArrayLike, ArrayLike]:
-        """(β, γ) の初期値を生成する（未実装）。
+        """(β, γ) の初期値を生成する。
 
         例:
             - β をゼロ初期化
@@ -319,9 +319,32 @@ class ADMMHazardAFT:
             初期値は収束性・局所解に影響する可能性があるため、random_state を考慮する設計が望ましい。
 
         Raises:
-            NotImplementedError: 現時点では未実装。
+            ValueError: time_grid の長さや基底数が不正な場合。
         """
-        raise NotImplementedError("Parameter initialization is not implemented yet.")
+        X_array = np.asarray(X)
+        if X_array.ndim != 2:
+            raise ValueError("X は 2 次元配列（n, p）である必要があります。")
+
+        time_grid = getattr(self, "time_grid_", self.time_grid)
+        K = len(time_grid) - 1
+        if K <= 0:
+            raise ValueError("time_grid は 2 点以上を含む必要があります。")
+
+        n_features = X_array.shape[1]
+        n_params = n_features + (1 if self.include_intercept else 0)
+        beta0 = np.zeros((K, n_params), dtype=float)
+
+        n_basis = int(self.n_baseline_basis)
+        if n_basis <= 0:
+            raise ValueError("n_baseline_basis は正の整数である必要があります。")
+
+        if self.random_state is None:
+            gamma0 = np.zeros(n_basis, dtype=float)
+        else:
+            rng = np.random.default_rng(self.random_state)
+            gamma0 = rng.normal(scale=1e-2, size=n_basis)
+
+        return beta0, gamma0
 
     def _build_components(self) -> _FitComponents:
         """学習に必要な内部コンポーネントを構築する。"""
@@ -390,22 +413,3 @@ class ADMMHazardAFT:
         if not hasattr(self, "coef_"):
             # predict/score を fit 前に呼んだ、などの利用ミスを明確にする。
             raise RuntimeError("This ADMMHazardAFT instance is not fitted yet.")
-
-
-def optimize_with_admm(model: ADMMHazardAFT, X: ArrayLike, y: ArrayLike) -> ADMMHazardAFT:
-    """与えられた推定器を ADMM で学習する薄いラッパ。
-
-    目的:
-        関数 API で使いたい場合に備えて残しているが、基本は model.fit を直接呼べばよい。
-
-    Args:
-        model: 学習対象の推定器。
-        X: 特徴量。
-        y: (time, event) などの目的変数。
-
-    Returns:
-        学習済みの model（fit が self を返すため同一インスタンス）。
-    """
-
-    # 実体は fit 呼び出しのみ。
-    return model.fit(X, y)
