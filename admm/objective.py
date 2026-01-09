@@ -5,16 +5,15 @@
     - β（時間区間ごとの係数）と γ（ベースライン係数）に関する勾配・ヘッセの計算
 
 設計意図:
-    ソルバ（ADMM）は微分の詳細を知らず、本クラスを通じて value/grad/hess のみ利用する。
+    ソルバ（ADMM）は微分の詳細を知らず、本クラスを通じて value と
+    β/γ ごとの勾配・ヘッセのみ利用する。
     これにより、ベースライン表現や求積法の差し替えが容易になる。
 
 注意:
-    現状は骨格のみで、value/grad/hess の本体は未実装。
+    現状は骨格のみで、value/grad_beta/grad_gamma/hess_* の本体は未実装。
 """
 
 from __future__ import annotations
-
-from typing import Tuple
 
 from .baseline import BaselineHazardModel
 from .quadrature import QuadratureRule
@@ -72,20 +71,18 @@ class HazardAFTObjective:
         """
         raise NotImplementedError("Objective value is not implemented yet.")
 
-    def grad(
+    def grad_beta(
         self,
         beta: ArrayLike,
         gamma: ArrayLike,
         X: ArrayLike,
         T: ArrayLike,
         delta: ArrayLike,
-    ) -> Tuple[ArrayLike, ArrayLike]:
-        """勾配（β と γ）を返す（未実装）。
+    ) -> ArrayLike:
+        """β に関する勾配を返す（未実装）。
 
         Returns:
-            (g_beta, g_gamma)
-            - g_beta: beta と同形状
-            - g_gamma: gamma と同形状
+            g_beta: beta と同形状
 
         注意:
             実装では η の計算、exp(η) のクリップ、求積による積分近似が関与する。
@@ -94,29 +91,89 @@ class HazardAFTObjective:
         Raises:
             NotImplementedError: 現時点では未実装。
         """
-        raise NotImplementedError("Objective gradient is not implemented yet.")
+        raise NotImplementedError("Objective gradient (beta) is not implemented yet.")
 
-    def hess(
+    def grad_gamma(
         self,
         beta: ArrayLike,
         gamma: ArrayLike,
         X: ArrayLike,
         T: ArrayLike,
         delta: ArrayLike,
-    ) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
-        """ヘッセ行列（ブロック）を返す（未実装）。
+    ) -> ArrayLike:
+        """γ に関する勾配を返す（未実装）。
 
         Returns:
-            (H_bb, H_bg, H_gg)
-            - H_bb: β に関するヘッセ（大きくなりやすい）
-            - H_bg: β-γ の混合ヘッセ（実装簡略化で無視する近似もあり得る）
-            - H_gg: γ に関するヘッセ
+            g_gamma: gamma と同形状
 
         注意:
-            実用上はブロック対角近似（H_bg を無視）にして Newton 更新を軽くする選択もある。
-            ただし本プロジェクトの方針に従い、まずは資料の式通りの丁寧実装を優先する。
+            実装では η の計算、exp(η) のクリップ、求積による積分近似が関与する。
+            形状不一致は実装時に頻出するため、入力検証（shape チェック）が重要。
 
         Raises:
             NotImplementedError: 現時点では未実装。
         """
-        raise NotImplementedError("Objective hessian is not implemented yet.")
+        raise NotImplementedError("Objective gradient (gamma) is not implemented yet.")
+
+    def hess_beta(
+        self,
+        beta: ArrayLike,
+        gamma: ArrayLike,
+        X: ArrayLike,
+        T: ArrayLike,
+        delta: ArrayLike,
+    ) -> ArrayLike:
+        """β に関するヘッセ行列を返す（未実装）。
+
+        Returns:
+            - H_bb: β に関するヘッセ（大きくなりやすい）
+
+        注意:
+            実用上はブロック対角近似として扱い、
+            β-γ の混合ヘッセは別メソッドで管理する前提。
+
+        Raises:
+            NotImplementedError: 現時点では未実装。
+        """
+        raise NotImplementedError("Objective hessian (beta) is not implemented yet.")
+
+    def hess_gamma(
+        self,
+        beta: ArrayLike,
+        gamma: ArrayLike,
+        X: ArrayLike,
+        T: ArrayLike,
+        delta: ArrayLike,
+    ) -> ArrayLike:
+        """γ に関するヘッセ行列を返す（未実装）。
+
+        Returns:
+            - H_gg: γ に関するヘッセ
+
+        Raises:
+            NotImplementedError: 現時点では未実装。
+        """
+        raise NotImplementedError("Objective hessian (gamma) is not implemented yet.")
+
+    def hess_beta_gamma(
+        self,
+        beta: ArrayLike,
+        gamma: ArrayLike,
+        X: ArrayLike,
+        T: ArrayLike,
+        delta: ArrayLike,
+    ) -> ArrayLike:
+        """β-γ の混合ヘッセを返す（未実装）。
+
+        Returns:
+            - H_bg: β-γ の混合ヘッセ
+
+        注意:
+            実装簡略化で無視する場合もあるが、式通りに実装するための枠を用意する。
+
+        Raises:
+            NotImplementedError: 現時点では未実装。
+        """
+        raise NotImplementedError(
+            "Objective hessian (beta-gamma) is not implemented yet."
+        )

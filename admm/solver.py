@@ -38,7 +38,7 @@ class FusedLassoADMMSolver:
         newton_tol: float,
         random_state: Optional[int],
     ) -> None:
-        # objective: 近似対数尤度の value/grad/hess を提供する目的関数。
+        # objective: 近似対数尤度の value と β/γ の勾配・ヘッセを提供する目的関数。
         self.objective = objective
 
         # lambda_fuse: fused lasso（差分の L1）正則化の強さ。
@@ -90,7 +90,7 @@ class FusedLassoADMMSolver:
             - history: 反復履歴（目的関数、残差、ステップ幅など）
 
         注意:
-            - objective.value/grad/hess は「最小化対象（例: -log \u007e{L}）」の
+            - objective.value/grad_* / hess_* は「最小化対象（例: -log \u007e{L}）」の
               符号規約に合わせて実装する前提。
             - H_bb は (K, p, p) のブロック配列、または (K*p, K*p) のフル行列を想定する。
 
@@ -189,8 +189,10 @@ class FusedLassoADMMSolver:
             # (1) gamma を Newton 更新 → (2) beta を Newton 更新（ブロック座標）
             for _ in range(newton_steps):
                 # gamma 更新（損失は objective 側の符号規約に合わせる）
-                _, g_gamma = self.objective.grad(beta, gamma, X_array, T_array, delta_array)
-                _, _, h_gg = self.objective.hess(
+                g_gamma = self.objective.grad_gamma(
+                    beta, gamma, X_array, T_array, delta_array
+                )
+                h_gg = self.objective.hess_gamma(
                     beta, gamma, X_array, T_array, delta_array
                 )
 
@@ -212,8 +214,10 @@ class FusedLassoADMMSolver:
                 gamma_step_norm = float(np.linalg.norm(gamma_step))
 
                 # beta 更新
-                g_beta, _ = self.objective.grad(beta, gamma, X_array, T_array, delta_array)
-                h_bb, _, _ = self.objective.hess(
+                g_beta = self.objective.grad_beta(
+                    beta, gamma, X_array, T_array, delta_array
+                )
+                h_bb = self.objective.hess_beta(
                     beta, gamma, X_array, T_array, delta_array
                 )
 
