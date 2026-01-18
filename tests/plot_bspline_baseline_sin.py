@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from admm.baseline import BSplineBaseline
+from admm.quadrature import QuadratureRule
 
 
 def open_uniform_knots(
@@ -48,6 +49,8 @@ def run(
     n_points: int,
     output: Optional[Path],
     show: bool,
+    quad_rule: str,
+    quad_q: int,
 ) -> None:
     x = np.linspace(x_min, x_max, n_points, dtype=float, endpoint=False)
     y = np.sin(x)
@@ -73,11 +76,43 @@ def run(
     print(f"RMSE cos(x): {rmse(dy, dy_hat):.6e}")
     print(f"RMSE -sin(x): {rmse(ddy, ddy_hat):.6e}")
 
+    quad = QuadratureRule({"rule": quad_rule, "Q": quad_q})
+    v, w = quad.nodes_weights(x_min, x_max)
+
+    integral_true = float(np.cos(x_min) - np.cos(x_max))
+    integral_hat = float((baseline.basis(v) @ gamma) @ w)
+    integral_abs_err = abs(integral_true - integral_hat)
+    integral_rel_err = integral_abs_err / (abs(integral_true) + 1e-12)
+    print(
+        "Integral sin(x) on [x_min,x_max]: "
+        f"true={integral_true:.6e}, approx={integral_hat:.6e}, "
+        f"abs_err={integral_abs_err:.6e}, rel_err={integral_rel_err:.6e} "
+        f"(quad: {quad.rule}, Q={quad.q})"
+    )
+
+    integral_dy_true = float(np.sin(x_max) - np.sin(x_min))
+    integral_dy_hat = float((baseline.basis_deriv(v) @ gamma) @ w)
+    abs_err_dy = abs(integral_dy_true - integral_dy_hat)
+    rel_err_dy = abs_err_dy / (abs(integral_dy_true) + 1e-12)
+    print(
+        "Integral cos(x) on [x_min,x_max]: "
+        f"true={integral_dy_true:.6e}, approx={integral_dy_hat:.6e}, "
+        f"abs_err={abs_err_dy:.6e}, rel_err={rel_err_dy:.6e}"
+    )
+
     if plt is None:
         print("matplotlib is not available. Skip plotting.")
         return
 
-    fig, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
+    # 累積積分（x_min から x まで）をグラフに追加
+    # ※ 高速化はまだ不要。Q×n_points の素直なループで計算する。
+    cumulative_true = np.cos(x_min) - np.cos(x)
+    cumulative_hat = np.empty_like(x, dtype=float)
+    for i, x_i in enumerate(x):
+        v_i, w_i = quad.nodes_weights(x_min, float(x_i))
+        cumulative_hat[i] = float((baseline.basis(v_i) @ gamma) @ w_i)
+
+    fig, axes = plt.subplots(4, 1, figsize=(8, 10), sharex=True)
     _add_knot_guides(axes, knots, x_min, x_max, degree)
     axes[0].plot(x, y, label="sin(x)", color="black")
     axes[0].plot(x, y_hat, label="bspline", color="C1")
@@ -85,6 +120,10 @@ def run(
     axes[0].legend()
     axes[0].grid(axis="y", alpha=0.3)
 
+    axes[0].set_title(
+        "Integral over [x_min, x_max]  "
+        f"true={integral_true:.3e}, approx={integral_hat:.3e}, abs_err={integral_abs_err:.3e}"
+    )
     axes[1].plot(x, dy, label="cos(x)", color="black")
     axes[1].plot(x, dy_hat, label="bspline deriv", color="C1")
     axes[1].set_ylabel("first deriv")
@@ -94,9 +133,20 @@ def run(
     axes[2].plot(x, ddy, label="-sin(x)", color="black")
     axes[2].plot(x, ddy_hat, label="bspline second deriv", color="C1")
     axes[2].set_ylabel("second deriv")
-    axes[2].set_xlabel("x")
     axes[2].legend()
     axes[2].grid(axis="y", alpha=0.3)
+
+    axes[3].plot(
+        x,
+        cumulative_true,
+        label=r"$\int_{x_{min}}^{x} \sin(t)\,dt$ (true)",
+        color="black",
+    )
+    axes[3].plot(x, cumulative_hat, label="bspline + quadrature", color="C1")
+    axes[3].set_ylabel("cumulative integral")
+    axes[3].set_xlabel("x")
+    axes[3].legend()
+    axes[3].grid(axis="y", alpha=0.3)
 
     fig.tight_layout()
 
@@ -171,8 +221,27 @@ def main() -> None:
     parser.add_argument("--no-save", action="store_true")
     parser.add_argument("--show", action="store_true")
 
+    parser.add_argument(
+        "--quad-rule",
+        type=str,
+        default="gauss_legendre",
+        help="Quadrature rule: gauss_legendre or simpson.",
+    )
+    parser.add_argument(
+        "--quad-q",
+        type=int,
+        default=25,
+        help="Quadrature points Q (Simpson requires odd >= 3).",
+    )
+
     args = parser.parse_args()
     output = None if args.no_save else args.output
+
+    if output is None and not args.show:
+        print(
+            "WARNING: --no-save かつ --show なしのため、グラフは保存も表示もされません。 "
+            "更新を確認したい場合は --no-save を外すか、--show を付けてください。"
+        )
 
     run(
         n_basis=args.n_basis,
@@ -182,6 +251,8 @@ def main() -> None:
         n_points=args.n_points,
         output=output,
         show=args.show,
+        quad_rule=args.quad_rule,
+        quad_q=args.quad_q,
     )
 
 
