@@ -170,12 +170,19 @@ class FusedLassoADMMSolver:
             dtd[1:, :-1] -= np.eye(K - 1)
 
         history: Dict[str, Any] = {
+            # 目的関数値（最小化対象）：-log\tilde{L} + fused lasso ペナルティ
             "objective": [],
+            # primal residual: ||Dβ - z||
             "primal_residual": [],
+            # dual residual: ||ρ D^T (z^k - z^{k-1})||
             "dual_residual": [],
+            # ADMM ペナルティ係数 ρ（適応化する場合は更新後の値）
             "rho": [],
+            # ADMM 1反復あたりの Newton ステップ数
             "newton_steps": [],
+            # β 更新量のノルム（damped Newton のステップ長を含む）
             "beta_step_norm": [],
+            # γ 更新量のノルム（damped Newton のステップ長を含む）
             "gamma_step_norm": [],
         }
 

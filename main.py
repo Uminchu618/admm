@@ -94,7 +94,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         cols = feature_cols
     index = [f"[{time_grid[k]}, {time_grid[k+1]})" for k in range(len(time_grid) - 1)]
     coef_df = pd.DataFrame(coef, columns=cols, index=index)
-
+    pd.set_option("display.max_columns", 100)
     print("\n=== Estimated beta (coef_) ===")
     print(coef_df)
     print("\n=== Estimated gamma (gamma_) ===")
