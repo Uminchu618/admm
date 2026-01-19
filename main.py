@@ -13,12 +13,14 @@
 """
 
 import argparse
+import os
 from pathlib import Path
 from typing import Optional, Sequence
 
 import pandas as pd
 
 from admm.config import load_config
+from admm.logger import WandBLogger, wandb_available
 from admm.model import ADMMHazardAFT
 
 
@@ -50,6 +52,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # 設定を読み込む。ファイル不在・拡張子非対応・パース失敗は例外として伝播する。
     config = load_config(args.config)
+
+    # WandB ログの準備（任意）。
+    wandb_logger = None
+    wandb_project = os.getenv("WANDB_PROJECT")
+    wandb_enabled = os.getenv("WANDB_ENABLED", "").lower() in {"1", "true", "yes"}
+    if wandb_project or wandb_enabled:
+        if wandb_project is None or wandb_project == "":
+            wandb_project = "admm"
+        if wandb_available():
+            wandb_logger = WandBLogger(project=wandb_project, name="admm-run")
+            wandb_logger.start_run(config={"config": config})
+        else:
+            print("WandB が利用できないためロギングをスキップします。")
 
     # 設定辞書から推定器を構築する。
     # 余計なキーや型不一致があれば TypeError が発生し得る。
@@ -95,6 +110,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
     print({"objective": last_obj, "primal_residual": last_pr, "dual_residual": last_dr})
+
+    # WandB に履歴を可視化（時系列ログ）
+    if wandb_logger is not None:
+        wandb_logger.log_history(model.history_)
+        wandb_logger.log_metrics(
+            {
+                "objective_last": last_obj,
+                "primal_residual_last": last_pr,
+                "dual_residual_last": last_dr,
+            },
+            prefix="summary",
+        )
+        wandb_logger.finish()
 
 
 if __name__ == "__main__":
