@@ -114,9 +114,30 @@ class BSplineBaseline(BaselineHazardModel):
         if self.degree < 0:
             raise ValueError("degree は 0 以上の整数である必要があります")
         if knots is None:
-            raise ValueError("knots を指定してください")
+            x_min, x_max = float(knot_range[0]), float(knot_range[1])
+            self.knots = self._open_uniform_knots(
+                self.n_basis, self.degree, x_min, x_max
+            )
         else:
             self.knots = self._validate_knots(knots)
+
+    def _open_uniform_knots(
+        self, n_basis: int, degree: int, x_min: float, x_max: float
+    ) -> np.ndarray:
+        if not np.isfinite(x_min) or not np.isfinite(x_max):
+            raise ValueError("knot_range は有限値である必要があります")
+        if x_max <= x_min:
+            raise ValueError("knot_range は (min < max) である必要があります")
+        n_internal = n_basis - (degree + 1)
+        if n_internal < 0:
+            raise ValueError("n_basis must be at least degree + 1")
+        if n_internal > 0:
+            internal = np.linspace(x_min, x_max, n_internal + 2, dtype=float)[1:-1]
+        else:
+            internal = np.array([], dtype=float)
+        left = np.full(degree + 1, x_min, dtype=float)
+        right = np.full(degree + 1, x_max, dtype=float)
+        return np.concatenate([left, internal, right])
 
     def basis(self, x: ArrayLike) -> ArrayLike:
         """B-spline 基底行列 S(x) を返す"""

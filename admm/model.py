@@ -64,7 +64,7 @@ class ADMMHazardAFT:
     def __init__(
         self,
         time_grid: Sequence[float],
-        include_intercept: bool = True,
+        include_intercept: bool = False,
         baseline_basis: str = "bspline",
         n_baseline_basis: int = 10,
         quadrature: Optional[Dict[str, Any]] = None,
@@ -395,7 +395,20 @@ class ADMMHazardAFT:
         # baseline_basis の分岐は将来の拡張ポイント。
         if self.baseline_basis == "bspline":
             # B-spline を選択した場合、基底数 n_baseline_basis を渡して生成する。
-            return BSplineBaseline(self.n_baseline_basis)
+            # knots が未指定の場合、baseline 側で open uniform knots を生成する。
+            # その範囲はまず time_grid の [t0, tK] を採用する（高速化/自動調整は将来）。
+            time_grid = getattr(self, "time_grid_", self.time_grid)
+            # z = exp(eta) * t を評価するため、clip_eta に基づく上限までカバーする。
+            # exp(eta) は objective 側で eta を [-clip_eta, clip_eta] にクリップしている。
+            x_min = 0.0
+            x_max = float(time_grid[-1]) * float(np.exp(self.clip_eta))
+            return BSplineBaseline(
+                n_basis=self.n_baseline_basis,
+                degree=3,
+                knots=None,
+                knot_range=(x_min, x_max),
+                extrapolate=False,
+            )
 
         # 未対応の指定は、誤設定を早期発見するため NotImplementedError とする。
         raise NotImplementedError(

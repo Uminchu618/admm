@@ -13,7 +13,8 @@
 #   時間分割の区間端点 (t0, t1, ..., tK)。
 #   β(t) を「各区間で区分一定」として表現するための基準となる。
 #   通常は単調増加（t0 < t1 < ... < tK）を満たすように設定する。
-time_grid = [0.0, 1.0]
+# simulated_data.csv は time が最大 5.0 まであるため、time_grid もその範囲をカバーする。
+time_grid = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
 
 # include_intercept:
 #   切片（定数項）を β に含めるかどうか。
@@ -28,7 +29,7 @@ baseline_basis = "bspline"
 # n_baseline_basis:
 #   ベースライン基底の数 M。
 #   大きいほど柔軟だが、過学習・数値不安定（ヘッセの悪条件化など）のリスクが増える。
-n_baseline_basis = 3
+n_baseline_basis = 8
 
 [quadrature]
 
@@ -87,7 +88,7 @@ newton_tol = 1e-6
 # clip_eta:
 #   exp(η) の発散（overflow）を避けるためのクリッピング幅。
 #   典型的には η を [-clip_eta, clip_eta] に制限して計算を安定化させる。
-clip_eta = 20.0
+clip_eta = 5.0
 
 # random_state:
 #   初期値生成などで乱数を使う場合のシード。

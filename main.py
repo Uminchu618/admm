@@ -5,7 +5,6 @@
     学習・推論処理へ接続するためのコマンドライン実行口を提供する。
 
 現状:
-    - 推定器本体は skeleton 段階のため、この CLI は主に "設定が読める" "初期化できる" ことの確認用。
     - 学習データの読み込みや fit/predict などは今後の実装で追加される想定。
 
 想定される例外:
@@ -64,13 +63,38 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         missing = sorted(required_cols - set(data.columns))
         raise ValueError(f"Missing required columns in {data_path}: {missing}")
 
-    feature_cols = [col for col in data.columns if col not in {"time", "event", "time_true"}]
+    feature_cols = [
+        col for col in data.columns if col not in {"time", "event", "time_true"}
+    ]
     X = data[feature_cols].to_numpy()
     y = data[["time", "event"]].to_numpy()
     model.fit(X, y)
 
-    # skeleton 段階のため、生成できたことを表示して終了する。
-    print("ADMMHazardAFT skeleton initialized from config.", model)
+    # 推定された β を見やすく表示する。
+    coef = model.coef_
+    time_grid = model.time_grid_
+    if model.include_intercept:
+        cols = ["intercept"] + feature_cols
+    else:
+        cols = feature_cols
+    index = [f"[{time_grid[k]}, {time_grid[k+1]})" for k in range(len(time_grid) - 1)]
+    coef_df = pd.DataFrame(coef, columns=cols, index=index)
+
+    print("\n=== Estimated beta (coef_) ===")
+    print(coef_df)
+    print("\n=== Estimated gamma (gamma_) ===")
+    print(model.gamma_)
+    print("\n=== ADMM history (last) ===")
+    last_obj = model.history_["objective"][-1] if model.history_["objective"] else None
+    last_pr = (
+        model.history_["primal_residual"][-1]
+        if model.history_["primal_residual"]
+        else None
+    )
+    last_dr = (
+        model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
+    )
+    print({"objective": last_obj, "primal_residual": last_pr, "dual_residual": last_dr})
 
 
 if __name__ == "__main__":

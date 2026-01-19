@@ -182,9 +182,67 @@ class FusedLassoADMMSolver:
         newton_steps = max(1, int(self.newton_steps_per_admm))
         newton_steps = min(newton_steps, max(1, int(self.max_newton_iter)))
 
+        def safe_value(beta_mat: np.ndarray, gamma_vec: np.ndarray) -> float:
+            try:
+                v = float(
+                    self.objective.value(
+                        beta_mat, gamma_vec, X_array, T_array, delta_array
+                    )
+                )
+            except Exception:
+                return float("inf")
+            if not np.isfinite(v):
+                return float("inf")
+            return v
+
+        def damped_update_gamma(
+            beta_mat: np.ndarray,
+            gamma_vec: np.ndarray,
+            step: np.ndarray,
+            base_value: float,
+            max_backtrack: int = 12,
+        ) -> tuple[np.ndarray, float, float]:
+            if not np.all(np.isfinite(step)):
+                return gamma_vec, 0.0, base_value
+            scale = 1.0
+            for _ in range(max_backtrack):
+                cand = gamma_vec - scale * step
+                if not np.all(np.isfinite(cand)):
+                    scale *= 0.5
+                    continue
+                cand_val = safe_value(beta_mat, cand)
+                if cand_val <= base_value:
+                    return cand, scale, cand_val
+                scale *= 0.5
+            return gamma_vec, 0.0, base_value
+
+        def damped_update_beta(
+            beta_mat: np.ndarray,
+            gamma_vec: np.ndarray,
+            step_vec: np.ndarray,
+            base_value: float,
+            max_backtrack: int = 12,
+        ) -> tuple[np.ndarray, float, float]:
+            if not np.all(np.isfinite(step_vec)):
+                return beta_mat, 0.0, base_value
+            step_mat = step_vec.reshape(beta_mat.shape)
+            scale = 1.0
+            for _ in range(max_backtrack):
+                cand = beta_mat - scale * step_mat
+                if not np.all(np.isfinite(cand)):
+                    scale *= 0.5
+                    continue
+                cand_val = safe_value(cand, gamma_vec)
+                if cand_val <= base_value:
+                    return cand, scale, cand_val
+                scale *= 0.5
+            return beta_mat, 0.0, base_value
+
         for admm_iter in range(int(self.max_admm_iter)):
             beta_step_norm = 0.0
             gamma_step_norm = 0.0
+
+            base_val_for_newton = safe_value(beta, gamma)
 
             # (1) gamma を Newton 更新 → (2) beta を Newton 更新（ブロック座標）
             for _ in range(newton_steps):
@@ -210,8 +268,11 @@ class FusedLassoADMMSolver:
                     gamma_step = np.linalg.solve(
                         h_gg + damp * np.eye(h_gg.shape[0]), g_gamma_vec
                     )
-                gamma -= gamma_step
-                gamma_step_norm = float(np.linalg.norm(gamma_step))
+                gamma_candidate, gamma_scale, base_val_for_newton = damped_update_gamma(
+                    beta, gamma, gamma_step, base_val_for_newton
+                )
+                gamma_step_norm = float(np.linalg.norm(gamma_scale * gamma_step))
+                gamma = gamma_candidate
 
                 # beta 更新
                 g_beta = self.objective.grad_beta(
@@ -241,7 +302,10 @@ class FusedLassoADMMSolver:
                         start = k * n_beta
                         end = start + n_beta
                         h_full[start:end, start:end] = h_bb_arr[k]
-                elif h_bb_arr.ndim == 2 and h_bb_arr.shape == (n_beta_total, n_beta_total):
+                elif h_bb_arr.ndim == 2 and h_bb_arr.shape == (
+                    n_beta_total,
+                    n_beta_total,
+                ):
                     h_full = h_bb_arr
                 else:
                     raise ValueError("H_bb の形状が想定と一致しません。")
@@ -260,8 +324,12 @@ class FusedLassoADMMSolver:
                     beta_step = np.linalg.solve(
                         h_full + damp * np.eye(h_full.shape[0]), g_beta_vec
                     )
-                beta -= beta_step.reshape(beta.shape)
-                beta_step_norm = float(np.linalg.norm(beta_step))
+
+                beta_candidate, beta_scale, base_val_for_newton = damped_update_beta(
+                    beta, gamma, beta_step, base_val_for_newton
+                )
+                beta_step_norm = float(np.linalg.norm(beta_scale * beta_step))
+                beta = beta_candidate
 
                 if (
                     beta_step_norm < self.newton_tol
