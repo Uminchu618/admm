@@ -88,10 +88,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # 推定された β を見やすく表示する。
     coef = model.coef_
     time_grid = model.time_grid_
-    if model.include_intercept:
-        cols = ["intercept"] + feature_cols
-    else:
-        cols = feature_cols
+    cols = feature_cols
     index = [f"[{time_grid[k]}, {time_grid[k+1]})" for k in range(len(time_grid) - 1)]
     coef_df = pd.DataFrame(coef, columns=cols, index=index)
     pd.set_option("display.max_columns", 100)

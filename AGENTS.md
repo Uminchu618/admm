@@ -32,7 +32,6 @@ docs\slides15.md
 * モデル構造：
 
   * `time_grid`: `(t0,...,tK)`（区間端点。β(t)の区分一定を決める）
-  * `include_intercept: bool`（β_{0k} を持つか）
   * `baseline_basis`: `"bspline"` or `"mspline5"`（将来差し替え前提）
   * `n_baseline_basis: int`（B-spline の M）
 * 近似：
@@ -53,7 +52,7 @@ docs\slides15.md
 
 **学習後属性（末尾 `_`）**
 
-* `coef_`: shape `(K, p)`（もしくは `(K, p+1)`：intercept込み）
+* `coef_`: shape `(K, p)`
 * `gamma_`: baseline スプライン係数（あなたの記法の γ）
 * `time_grid_`, `n_features_in_`, `feature_names_in_`（可能なら）
 * ADMM 状態：

@@ -116,7 +116,6 @@ class TimePartition:
 
         想定:
             β を (K, p) とし、X を (n, p) とすると、η は (n, K) の行列になる。
-            include_intercept=True の場合は切片を考慮した形にする必要がある。
 
         Args:
             beta: 時間区間ごとの係数。
@@ -146,12 +145,9 @@ class TimePartition:
             raise ValueError("beta の行数（K）が time_grid と一致しません")
 
         n_samples, n_features = X_arr.shape
-        if n_beta == n_features + 1:
-            X_design = np.column_stack([np.ones(n_samples, dtype=float), X_arr])
-        elif n_beta == n_features:
-            X_design = X_arr
-        else:
-            raise ValueError("beta の列数が X の特徴量数（+切片）と整合しません")
+        if n_beta != n_features:
+            raise ValueError("beta の列数が X の特徴量数と整合しません")
+        X_design = X_arr
 
         # (n, p_beta) @ (p_beta, K) -> (n, K)
         return X_design @ beta_arr.T

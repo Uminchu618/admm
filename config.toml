@@ -16,14 +16,9 @@
 # simulated_data.csv は time が最大 5.0 まであるため、time_grid もその範囲をカバーする。
 time_grid = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
 
-# include_intercept:
-#   切片（定数項）を β に含めるかどうか。
-#   true の場合、各時間区間で β_{0k}（切片）が入る想定。
-include_intercept = false
-
 # baseline_basis:
 #   ベースライン（基準）ハザードの基底の種類。
-#   現状の実装は "bspline" のみを想定（未対応の値は NotImplementedError になり得る）。
+#   現状の実装は "bspline" のみを想定（未対応の値は NotImplementedError ）。
 baseline_basis = "bspline"
 
 # n_baseline_basis:

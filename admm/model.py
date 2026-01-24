@@ -1,14 +1,4 @@
-"""ADMM による fused lasso 付き Hazard-AFT 推定器（sklearn 風 API）。
-
-本モジュールは Estimator（外側の "顔"）を提供する。
-設計意図は AGENTS.md の方針に沿い、ハイパーパラメータは __init__ 引数、
-学習結果と ADMM 状態は fit 後属性（末尾 '_'）として保持する。
-
-注意:
-    現状は skeleton 実装であり、入力検証・初期化・推論・スコアは未実装。
-    ただし、コンポーネントの依存関係（objective/solver/baseline など）を組み立てる流れは
-    将来の実装の土台になる。
-"""
+"""ADMM による fused lasso 付き Hazard-AFT 推定器"""
 
 from __future__ import annotations
 
@@ -48,7 +38,7 @@ class ADMMHazardAFT:
     """ADMM による fused lasso 正則化付き Hazard-AFT モデル（推定器）。
 
     sklearn 互換の作法:
-        - __init__ ではハイパーパラメータを属性に保存するだけ（副作用なし）
+        - __init__ ではハイパーパラメータを属性に保存するだけ
         - fit により学習し、coef_ / gamma_ / z_ / u_ / history_ 等を保持する
 
     主要ハイパーパラメータ（概念）:
@@ -64,7 +54,6 @@ class ADMMHazardAFT:
     def __init__(
         self,
         time_grid: Sequence[float],
-        include_intercept: bool = False,
         baseline_basis: str = "bspline",
         n_baseline_basis: int = 10,
         quadrature: Optional[Dict[str, Any]] = None,
@@ -79,10 +68,8 @@ class ADMMHazardAFT:
         clip_eta: float = 20.0,
         random_state: Optional[int] = None,
     ) -> None:
-        # 以降は sklearn 流に「引数をそのまま属性に保存」する。
-        # 副作用（乱数生成、I/O、重い計算）は行わない。
+
         self.time_grid = time_grid
-        self.include_intercept = include_intercept
         self.baseline_basis = baseline_basis
         self.n_baseline_basis = n_baseline_basis
         self.quadrature = quadrature
@@ -331,8 +318,7 @@ class ADMMHazardAFT:
             raise ValueError("time_grid は 2 点以上を含む必要があります。")
 
         n_features = X_array.shape[1]
-        n_params = n_features + (1 if self.include_intercept else 0)
-        beta0 = np.zeros((K, n_params), dtype=float)
+        beta0 = np.zeros((K, n_features), dtype=float)
 
         n_basis = int(self.n_baseline_basis)
         if n_basis <= 0:

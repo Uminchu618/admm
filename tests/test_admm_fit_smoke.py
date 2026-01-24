@@ -26,7 +26,6 @@ def main() -> None:
 
     model = ADMMHazardAFT(
         time_grid=time_grid,
-        include_intercept=True,
         baseline_basis="bspline",
         n_baseline_basis=8,
         quadrature={"rule": "gauss_legendre", "Q": 5},
@@ -48,7 +47,7 @@ def main() -> None:
         raise AssertionError("coef_ not set")
     if not hasattr(fitted, "gamma_"):
         raise AssertionError("gamma_ not set")
-    if fitted.coef_.shape != (len(time_grid) - 1, p + 1):
+    if fitted.coef_.shape != (len(time_grid) - 1, p):
         raise AssertionError(f"coef_ shape mismatch: {fitted.coef_.shape}")
     if fitted.gamma_.shape != (8,):
         raise AssertionError(f"gamma_ shape mismatch: {fitted.gamma_.shape}")

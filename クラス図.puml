@@ -1,0 +1,121 @@
+@startuml
+title ADMM Hazard-AFT (Current Class Structure)
+skinparam classAttributeIconSize 0
+
+package admm {
+  class ADMMHazardAFT {
+    +time_grid
+    +baseline_basis
+    +n_baseline_basis
+    +quadrature
+    +lambda_fuse
+    +rho
+    +max_admm_iter
+    +admm_tol_primal
+    +admm_tol_dual
+    +newton_steps_per_admm
+    +max_newton_iter
+    +newton_tol
+    +clip_eta
+    +random_state
+    --
+    +fit(X, y)
+    +predict_survival_function(X, times)
+    +predict_cumulative_hazard(X, times)
+    +predict_risk_score(X, time)
+    +score(X, y)
+  }
+
+  class _FitComponents {
+    +baseline: BaselineHazardModel
+    +time_partition: TimePartition
+    +quadrature: QuadratureRule
+    +objective: HazardAFTObjective
+    +solver: FusedLassoADMMSolver
+  }
+
+  abstract class BaselineHazardModel {
+    +basis(x)
+    +basis_deriv(x)
+    +basis_second_deriv(x)
+  }
+
+  class BSplineBaseline {
+    +n_basis
+    +degree
+    +knots
+    +knot_range
+    +extrapolate
+  }
+
+  class TimePartition {
+    +time_grid
+    +interval_index(T)
+    +iter_intervals(T)
+    +eta(beta, X)
+  }
+
+  class QuadratureRule {
+    +config
+    +rule
+    +q
+    +nodes_weights(a, b)
+  }
+
+  class HazardAFTObjective {
+    +baseline: BaselineHazardModel
+    +time_partition: TimePartition
+    +quadrature: QuadratureRule
+    +clip_eta
+    --
+    +value(beta, gamma, X, T, delta)
+    +grad_beta(beta, gamma, X, T, delta)
+    +grad_gamma(beta, gamma, X, T, delta)
+    +hess_beta(beta, gamma, X, T, delta)
+    +hess_gamma(beta, gamma, X, T, delta)
+  }
+
+  class FusedLassoADMMSolver {
+    +objective: HazardAFTObjective
+    +lambda_fuse
+    +rho
+    +max_admm_iter
+    +admm_tol_primal
+    +admm_tol_dual
+    +newton_steps_per_admm
+    +max_newton_iter
+    +newton_tol
+    +random_state
+    --
+    +solve(beta0, gamma0, X, T, delta)
+  }
+
+  class WandBLogger {
+    +project
+    +entity
+    +name
+    +tags
+    +enabled
+    --
+    +start_run(config, name, tags)
+    +log_fit(history_row, step)
+    +log_metrics(metrics, step, prefix)
+    +log_history(history, prefix)
+    +finish()
+  }
+}
+
+ADMMHazardAFT --> _FitComponents
+_FitComponents --> BaselineHazardModel
+_FitComponents --> TimePartition
+_FitComponents --> QuadratureRule
+_FitComponents --> HazardAFTObjective
+_FitComponents --> FusedLassoADMMSolver
+
+BaselineHazardModel <|-- BSplineBaseline
+HazardAFTObjective --> BaselineHazardModel
+HazardAFTObjective --> TimePartition
+HazardAFTObjective --> QuadratureRule
+FusedLassoADMMSolver --> HazardAFTObjective
+
+@enduml
