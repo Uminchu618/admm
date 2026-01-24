@@ -35,6 +35,7 @@ class QuadratureRule:
         self.config = config or {}
         self.rule = self._normalize_rule(self.config.get("rule", "gauss_legendre"))
         self.q = int(self.config.get("Q", 10))
+        self._leggauss_cache: Optional[Tuple[np.ndarray, np.ndarray]] = None
         self._validate_rule()
 
     def nodes_weights(self, a: float, b: float) -> Tuple[ArrayLike, ArrayLike]:
@@ -69,7 +70,7 @@ class QuadratureRule:
             return v, w
 
         if self.rule == "gauss_legendre":
-            nodes, weights = np.polynomial.legendre.leggauss(self.q)
+            nodes, weights = self._get_leggauss_nodes_weights()
             half = 0.5 * (b_float - a_float)
             center = 0.5 * (b_float + a_float)
             v = half * nodes + center
@@ -94,6 +95,11 @@ class QuadratureRule:
                 raise ValueError("Simpson の Q は 3 以上の奇数である必要があります。")
             return
         raise ValueError(f"未知の rule が指定されました: {self.rule!r}")
+
+    def _get_leggauss_nodes_weights(self) -> Tuple[np.ndarray, np.ndarray]:
+        if self._leggauss_cache is None:
+            self._leggauss_cache = np.polynomial.legendre.leggauss(self.q)
+        return self._leggauss_cache
 
     def _normalize_rule(self, rule: Any) -> str:
         if rule is None:
