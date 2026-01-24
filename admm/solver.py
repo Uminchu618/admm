@@ -271,8 +271,9 @@ class FusedLassoADMMSolver:
                         h_full + damp * np.eye(h_full.shape[0]), g_beta_vec
                     )
 
-                beta = beta - beta_step
-                beta_step_norm = float(np.linalg.norm(beta_step))
+                beta_step_mat = beta_step.reshape(beta.shape)
+                beta = beta - beta_step_mat
+                beta_step_norm = float(np.linalg.norm(beta_step_mat))
 
                 if (
                     beta_step_norm < self.newton_tol
