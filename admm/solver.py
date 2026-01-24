@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from .objective import HazardAFTObjective
 from .types import ArrayLike
@@ -189,7 +190,11 @@ class FusedLassoADMMSolver:
         newton_steps = max(1, int(self.newton_steps_per_admm))
         newton_steps = min(newton_steps, max(1, int(self.max_newton_iter)))
 
-        for admm_iter in range(int(self.max_admm_iter)):
+        for admm_iter in tqdm(
+            range(int(self.max_admm_iter)),
+            desc="ADMM",
+            leave=False,
+        ):
             beta_step_norm = 0.0
             gamma_step_norm = 0.0
 

@@ -1,0 +1,29 @@
+{
+    "n": 1000,
+    "scenario": 1,
+    "x23_dist": "normal",
+    "seed": 42,
+    "baseline": {
+        "alpha": 1.5,
+        "rho": 3.0
+    },
+    "time_dependence": {
+        "b11": 0.8,
+        "c1": 0.6,
+        "b21": 0.7,
+        "c2": 0.8,
+        "b31": 0.25,
+        "t0": 2.0,
+        "b30": 0.2
+    },
+    "censoring": {
+        "admin_time": 6.0,
+        "random_a": 1.0,
+        "random_b": 8.0
+    },
+    "grid": {
+        "dt": 0.0003,
+        "epsilon": 0.001,
+        "t_max": 8.0
+    }
+}

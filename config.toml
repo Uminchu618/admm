@@ -13,8 +13,8 @@
 #   時間分割の区間端点 (t0, t1, ..., tK)。
 #   β(t) を「各区間で区分一定」として表現するための基準となる。
 #   通常は単調増加（t0 < t1 < ... < tK）を満たすように設定する。
-# simulated_data.csv は time が最大 5.0 まであるため、time_grid もその範囲をカバーする。
-time_grid = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+# simulated_data.csv は time が最大 6.0 まであるため、time_grid もその範囲をカバーする。
+time_grid = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
 
 # baseline_basis:
 #   ベースライン（基準）ハザードの基底の種類。
@@ -55,7 +55,8 @@ rho = 1.0
 
 # max_admm_iter:
 #   ADMM 反復の最大回数。
-max_admm_iter = 100
+#   実行確認用に小さめにしている（本番は必要に応じて増やす）。
+max_admm_iter = 10
 
 # admm_tol_primal:
 #   primal residual の収束閾値。
