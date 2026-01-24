@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+data/
+
+# テンポラリのグラフは保存しない
+/*.png
+
+/wandb
+/.env
