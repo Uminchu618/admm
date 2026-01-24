@@ -121,6 +121,8 @@ class BSplineBaseline(BaselineHazardModel):
         else:
             self.knots = self._validate_knots(knots)
 
+        self._spline_cache: dict[int, BSpline] = {}
+
     def _open_uniform_knots(
         self, n_basis: int, degree: int, x_min: float, x_max: float
     ) -> np.ndarray:
@@ -209,9 +211,12 @@ class BSplineBaseline(BaselineHazardModel):
         return x_array
 
     def _design_matrix(self, x: np.ndarray, degree: int) -> np.ndarray:
-        n_basis = len(self.knots) - degree - 1
-        coeffs = np.eye(n_basis, dtype=float)
-        spline = BSpline(self.knots, coeffs, degree, extrapolate=self.extrapolate)
+        spline = self._spline_cache.get(degree)
+        if spline is None:
+            n_basis = len(self.knots) - degree - 1
+            coeffs = np.eye(n_basis, dtype=float)
+            spline = BSpline(self.knots, coeffs, degree, extrapolate=self.extrapolate)
+            self._spline_cache[degree] = spline
         return spline(x)
 
     def _validate_knots(self, knots: Sequence[float]) -> np.ndarray:
