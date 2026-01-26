@@ -17,7 +17,13 @@ import os
 from pathlib import Path
 from typing import Optional, Sequence
 
+import numpy as np
 import pandas as pd
+
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
 from admm.config import load_config
 from admm.logger import WandBLogger, wandb_available
@@ -79,7 +85,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         raise ValueError(f"Missing required columns in {data_path}: {missing}")
 
     feature_cols = [
-        col for col in data.columns if col not in {"time", "event", "time_true"}
+        col
+        for col in data.columns
+        if col not in {"time", "event", "time_true", "c1", "c2"}
     ]
     X = data[feature_cols].to_numpy()
     y = data[["time", "event"]].to_numpy()
@@ -107,6 +115,25 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
     print({"objective": last_obj, "primal_residual": last_pr, "dual_residual": last_dr})
+
+    # β の推定値を時間軸でステップ表示（区分一定）
+    if plt is None:
+        print("matplotlib が利用できないため β のプロットをスキップします。")
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        for j, name in enumerate(feature_cols):
+            beta_step = np.r_[coef[:, j], coef[-1, j]]
+            ax.step(time_grid, beta_step, where="post", label=name)
+        ax.set_xlabel("time")
+        ax.set_ylabel("Estimated β")
+        ax.set_title("Estimated β by time interval")
+        ax.legend(loc="best", fontsize="small", ncol=2)
+        ax.grid(True, linestyle=":", alpha=0.6)
+        output_path = Path("beta_step.png")
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=150)
+        print(f"Saved beta plot to {output_path}")
+        plt.show()
 
     # WandB に履歴を可視化（時系列ログ）
     if wandb_logger is not None:
