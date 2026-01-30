@@ -13,6 +13,7 @@
 """
 
 import argparse
+import json
 import os
 from pathlib import Path
 from typing import Optional, Sequence
@@ -53,6 +54,34 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help="Path to a TOML or JSON config file.",
     )
 
+    # --data 引数:
+    # - 学習に使う CSV を指定する
+    # - 既定では data/simulated_data.csv を使う
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=Path("data/simulated_data.csv"),
+        help="Path to a CSV dataset (must include time/event columns).",
+    )
+
+    # --output 引数:
+    # - 結果 JSON の出力先を指定する
+    # - 指定がない場合は出力しない
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Path to write result JSON (optional).",
+    )
+
+    # --plot 引数:
+    # - β のステッププロットを保存するか
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Save beta step plot (requires matplotlib).",
+    )
+
     # 引数を解析する。argv が None なら OS のコマンドライン引数を使う。
     args = parser.parse_args(argv)
 
@@ -77,7 +106,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     model = ADMMHazardAFT.from_config(config)
 
     # データを読み込み、fit を呼び出す（fit 本体は未実装のため例外はそのまま伝播する）。
-    data_path = Path("data/simulated_data.csv")
+    data_path = args.data
     data = pd.read_csv(data_path)
     required_cols = {"time", "event"}
     if not required_cols.issubset(data.columns):
@@ -117,23 +146,48 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print({"objective": last_obj, "primal_residual": last_pr, "dual_residual": last_dr})
 
     # β の推定値を時間軸でステップ表示（区分一定）
-    if plt is None:
-        print("matplotlib が利用できないため β のプロットをスキップします。")
-    else:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        for j, name in enumerate(feature_cols):
-            beta_step = np.r_[coef[:, j], coef[-1, j]]
-            ax.step(time_grid, beta_step, where="post", label=name)
-        ax.set_xlabel("time")
-        ax.set_ylabel("Estimated β")
-        ax.set_title("Estimated β by time interval")
-        ax.legend(loc="best", fontsize="small", ncol=2)
-        ax.grid(True, linestyle=":", alpha=0.6)
-        output_path = Path("beta_step.png")
-        fig.tight_layout()
-        fig.savefig(output_path, dpi=150)
-        print(f"Saved beta plot to {output_path}")
-        plt.show()
+    if args.plot:
+        if plt is None:
+            print("matplotlib が利用できないため β のプロットをスキップします。")
+        else:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            for j, name in enumerate(feature_cols):
+                beta_step = np.r_[coef[:, j], coef[-1, j]]
+                ax.step(time_grid, beta_step, where="post", label=name)
+            ax.set_xlabel("time")
+            ax.set_ylabel("Estimated β")
+            ax.set_title("Estimated β by time interval")
+            ax.legend(loc="best", fontsize="small", ncol=2)
+            ax.grid(True, linestyle=":", alpha=0.6)
+            output_path = Path("beta_step.png")
+            fig.tight_layout()
+            fig.savefig(output_path, dpi=150)
+            print(f"Saved beta plot to {output_path}")
+            plt.show()
+
+    # 結果 JSON を出力
+    if args.output is not None:
+        output_path = args.output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        result = {
+            "data_path": str(data_path),
+            "n_samples": int(X.shape[0]),
+            "n_features": int(X.shape[1]),
+            "feature_cols": feature_cols,
+            "time_grid": list(map(float, time_grid)),
+            "coef": coef.tolist(),
+            "gamma": model.gamma_.tolist(),
+            "history": model.history_,
+            "summary": {
+                "objective_last": last_obj,
+                "primal_residual_last": last_pr,
+                "dual_residual_last": last_dr,
+            },
+            "config": config,
+        }
+        with output_path.open("w", encoding="utf-8") as handle:
+            json.dump(result, handle, ensure_ascii=False, indent=2)
+        print(f"Saved result JSON to {output_path}")
 
     # WandB に履歴を可視化（時系列ログ）
     if wandb_logger is not None:
