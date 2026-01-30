@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "$0")" && pwd)"
 data_dir="$repo_root/data/extended_aft"
 output_dir="$repo_root/outputs/extended_aft"
 config_path="$repo_root/config.toml"
-uv_bin="${UV_BIN:-uv}"
+uv_bin="${UV_BIN:-/home/sagara/.local/bin/uv}"
 
 mapfile -t files < <(ls "$data_dir"/*.csv 2>/dev/null | sort)
 if [ "${#files[@]}" -eq 0 ]; then

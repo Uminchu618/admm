@@ -87,9 +87,9 @@
 ############################################################################
 
 ######## ここからジョブとして実行するコマンドを書きます ####################
-curl -d "Start job $SGE_TASK_ID" ntfy.sh/shiroganealeart1352
+#curl -d "Start job $SGE_TASK_ID" ntfy.sh/shiroganealeart1352
 ./run.sh
-curl -d "End job $SGE_TASK_ID" ntfy.sh/shiroganealeart1352
+#curl -d "End job $SGE_TASK_ID" ntfy.sh/shiroganealeart1352
 ############################################################################
 
 ######## このスクリプトは qscript コマンドによって 2026/01/27 01:14:01 に作られました。
