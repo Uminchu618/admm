@@ -19,10 +19,16 @@ class WeibullBaseline:
 
 @dataclass
 class TDParams:
+    # time-dependent係数のパラメータ
+    # β1(t) = b11 * exp(-c1 * t)
     b11: float
     c1: float
+    # β2(t) = b21 * log(1 + c2 * t)
     b21: float
     c2: float
+    # β3(t) はシナリオ依存
+    # scenario=1: β3(t) = b31 * (t - t0)^2
+    # scenario=2: β3(t) = b30 (定数)
     b31: float
     t0: float
     b30: float
