@@ -1,49 +1,182 @@
+# ADMM Hazard-AFT Model
+
+ADMM（交互方向乗数法）を用いた Fused Lasso 正則化付き Hazard-AFT モデルの実装。
+
 ## 概要
 
 本リポジトリは、ADMM（Alternating Direction Method of Multipliers）を用いて
 fused lasso（時間方向の差分に対する L1 正則化）付きの Hazard-AFT モデルを推定するための
 Python 実装です。
 
-現状は「Estimator（sklearn 風 API）と内部コンポーネントの分離」「設定ファイルからの初期化」など、
-実装の骨格と責務分割を優先して整備しており、尤度・勾配・ヘッセ・ADMM 反復の本体は未実装です。
+時間区分ごとに回帰係数が変化する生存時間分析モデルを、Fused Lasso により時間方向のスパース性を導入しながら推定します。
 
-## 目的
+- **モデル**: Hazard-based AFT（Accelerated Failure Time）
+- **正則化**: Fused Lasso（区間間の差分に L1 ペナルティ）
+- **最適化**: ADMM（Alternating Direction Method of Multipliers）
+- **ベースラインハザード**: B-spline 基底展開
 
-- `fit/predict/score` を提供する推定器 `ADMMHazardAFT` を中心に、
-  目的関数（近似対数尤度）、時間分割、求積、ベースライン基底、ADMM ソルバを疎結合に保つ
-- 将来的な差し替え（例: B-spline → M/I-spline、求積ルール変更）を容易にする
-- 実験運用を想定し、設定（ハイパーパラメータ）を TOML/JSON で外部化する
-
-## 使い方（現状）
-
-推定器の初期化は、設定ファイルを通して確認できます（学習処理自体は未実装）。
-
-1) 設定ファイルを用意（例: `config.toml`）
-
-2) CLI を実行
+## インストール
 
 ```bash
-uv run main.py --config config.toml
+# uvを使った環境構築
+uv sync
+
+# または直接実行
+uv run main.py --config config.toml --data data/simulated_data.csv
 ```
 
-想定される例外:
-- 設定ファイルが存在しない: `FileNotFoundError`
-- TOML を Python < 3.11 で読み込もうとした: `RuntimeError`
-- JSON/TOML の構文が不正: パーサ由来の例外
+## 基本的な使い方
 
-## Module Layout（構成）
+### 単一実験の実行
+
+```bash
+uv run main.py --config config.toml --data data/simulated_data.csv --output result.json --plot
+```
+
+### Lambda並列実験（スパコン環境）
+
+Lambda値を変えながら複数のデータセットで並列実験を行います。
+
+#### 1. Lambda値の設定
+
+`lambda_grid.json` で実験する lambda値を定義：
+
+```json
+{
+  "description": "Lambda values for parallel experiments (log scale: 0.01 to 10, 10 points)",
+  "lambda_values": [0.01, 0.0215, 0.0464, 0.1, 0.215, 0.464, 1.0, 2.15, 4.64, 10.0]
+}
+```
+
+#### 2. ジョブ投入
+
+```bash
+# UGEアレイジョブとして投入（データ100件 × lambda10点 = 1000パターン）
+qsub qsub.sh
+```
+
+`qsub.sh` は `SGE_TASK_ID` を使って自動的に以下を切り替えます：
+- 処理するデータファイル（`data/extended_aft/*.csv`）
+- 使用する lambda値（`lambda_grid.json` から選択）
+
+#### 3. 結果の集計
+
+実験完了後、結果を集計：
+
+```bash
+uv run scripts/aggregate_lambda_results.py --base-dir outputs/lambda_experiments --output outputs/lambda_summary.csv
+```
+
+#### 4. 結果の可視化
+
+```bash
+uv run scripts/visualize_lambda_results.py --summary outputs/lambda_summary.csv --output-dir outputs/lambda_plots
+```
+
+生成されるプロット：
+- `lambda_vs_objective.png`: Lambda値と目的関数の関係
+- `lambda_distribution.png`: Lambda値ごとの目的関数分布（箱ひげ図）
+- `lambda_vs_convergence.png`: Lambda値と収束状況（primal/dual residual）
+
+### ローカルでのテスト実行
+
+```bash
+# 特定のタスクIDを指定して単一実験を実行
+./run_lambda_experiment.sh 1
+
+# データインデックスとlambdaインデックスの対応：
+# task_id = data_idx * n_lambda + lambda_idx + 1
+# 例: task_id=1 → data=1, lambda=1
+#     task_id=11 → data=2, lambda=1
+#     task_id=101 → data=11, lambda=1
+```
+
+## ディレクトリ構造
 
 ```
-admm/
-  __init__.py        公開 API のエクスポート
-  model.py           ADMMHazardAFT 推定器 + fit フロー
-  solver.py          ADMM ソルバ（fused lasso）
-  objective.py       近似対数尤度 + 勾配 + ヘッセ
-  baseline.py        ベースラインハザード基底（B-spline 等）
-  time_partition.py  time_grid と区間ユーティリティ
-  quadrature.py      数値積分（求積）ルール
-  config.py          設定ローダ（TOML/JSON）
-  types.py           共有の型エイリアス
-main.py              CLI エントリポイント（設定読み込み）
-config.toml          設定例
+.
+├── admm/                  # コアパッケージ
+│   ├── model.py          # ADMMHazardAFT推定器
+│   ├── solver.py         # ADMMソルバ
+│   ├── objective.py      # 目的関数・勾配・ヘッセ
+│   ├── baseline.py       # ベースラインハザード（B-spline）
+│   ├── time_partition.py # 時間分割・η計算
+│   ├── quadrature.py     # 求積ルール
+│   └── logger.py         # WandBロガー
+├── scripts/              # ユーティリティスクリプト
+│   ├── aggregate_lambda_results.py  # 結果集計
+│   └── visualize_lambda_results.py  # 結果可視化
+├── data/
+│   └── extended_aft/     # データセット（CSV）
+├── outputs/
+│   ├── lambda_experiments/  # Lambda実験結果
+│   │   └── {data_name}/
+│   │       └── lambda_{value}/
+│   │           ├── config.toml
+│   │           └── result.json
+│   ├── lambda_summary.csv  # 集計結果
+│   └── lambda_plots/       # 可視化プロット
+├── config.toml           # デフォルト設定
+├── lambda_grid.json      # Lambda並列実験用の値リスト
+├── qsub.sh              # UGEジョブスクリプト
+├── run_lambda_experiment.sh  # Lambda実験実行スクリプト
+└── main.py              # CLIエントリポイント
 ```
+
+## 設定ファイル（config.toml）
+
+主要なハイパーパラメータ：
+
+```toml
+time_grid = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]  # 時間分割
+lambda_fuse = 1.0        # Fused Lasso強度
+rho = 1.0                # ADMMペナルティ係数
+max_admm_iter = 100      # ADMM最大反復数
+clip_eta = 5.0           # exp(η)の発散抑制
+n_baseline_basis = 8     # B-spline基底数
+
+[quadrature]
+Q = 5                    # 求積点数
+rule = "gauss_legendre"  # 求積法
+```
+
+## テスト
+
+```bash
+# 全テスト実行
+uv run pytest tests/
+
+# 特定テスト実行
+uv run pytest tests/test_admm_fit_smoke.py -v
+```
+
+## WandBロギング（オプション）
+
+```bash
+# 環境変数でWandBを有効化
+export WANDB_PROJECT=admm-experiments
+export WANDB_ENABLED=true
+
+uv run main.py --config config.toml --data data/simulated_data.csv
+```
+
+## 実装状況
+
+✅ 実装済み：
+- ADMMソルバ本体
+- 目的関数（近似対数尤度）の勾配・ヘッセ
+- B-splineベースライン
+- Fused Lasso正則化
+- Lambda並列実験フレームワーク
+- 結果集計・可視化スクリプト
+
+🚧 今後の実装：
+- 生存関数・累積ハザードの予測API
+- 評価指標（C-index, Brier scoreなど）
+- 適応的ρ調整
+- M/I-splineベースライン（積分の解析的計算）
+
+## 参考文献
+
+- Pang et al. (2021). "Flexible Extension of the Accelerated Failure Time Model to Account for Nonlinear and Time-Dependent Effects of Covariates on the Hazard." *Statistical Methods in Medical Research*, 30(11), 2526–42.
+- Boyd et al. (2011). "Distributed Optimization and Statistical Learning via the Alternating Direction Method of Multipliers." *Foundations and Trends in Machine Learning*, 3(1), 1–122.
