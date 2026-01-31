@@ -10,11 +10,13 @@
 """
 
 import argparse
+import json
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-import seaborn as sns
 
 
 def plot_lambda_vs_objective(df: pd.DataFrame, output_dir: Path) -> None:
@@ -56,26 +58,138 @@ def plot_lambda_vs_objective(df: pd.DataFrame, output_dir: Path) -> None:
     plt.close(fig)
 
 
-def plot_lambda_distribution(df: pd.DataFrame, output_dir: Path) -> None:
-    """Lambda値ごとの目的関数分布を箱ひげ図で表示
+def load_beta_results(
+    results_dir: Path,
+) -> Tuple[Dict[float, List[np.ndarray]], np.ndarray]:
+    """結果JSONからbetaを読み込み、lambdaごとに集約する。
+
+    Returns:
+        (beta_by_lambda, time_grid)
+    """
+    beta_by_lambda: Dict[float, List[np.ndarray]] = {}
+    time_grid_ref: np.ndarray | None = None
+
+    for result_path in results_dir.rglob("result.json"):
+        lambda_dir = result_path.parent.name
+        if not lambda_dir.startswith("lambda_"):
+            continue
+        try:
+            lambda_val = float(lambda_dir.replace("lambda_", ""))
+        except ValueError:
+            continue
+
+        with open(result_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        coef = np.asarray(payload.get("coef"), dtype=float)
+        time_grid = np.asarray(payload.get("time_grid"), dtype=float)
+        if coef.ndim != 2 or time_grid.ndim != 1:
+            continue
+
+        if time_grid_ref is None:
+            time_grid_ref = time_grid
+        elif time_grid_ref.shape != time_grid.shape or not np.allclose(
+            time_grid_ref, time_grid
+        ):
+            continue
+
+        beta_by_lambda.setdefault(lambda_val, []).append(coef)
+
+    if time_grid_ref is None:
+        raise FileNotFoundError("No valid result.json found in results_dir.")
+
+    return beta_by_lambda, time_grid_ref
+
+
+def compute_true_beta(time_points: np.ndarray, config_path: Path) -> np.ndarray:
+    """生成設定から真のbeta(t)を計算する。"""
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    td = cfg["time_dependence"]
+    scenario = cfg["scenario"]
+
+    beta1 = td["b11"] * np.exp(-td["c1"] * time_points)
+    beta2 = td["b21"] * np.log1p(td["c2"] * time_points)
+    if scenario == 1:
+        beta3 = td["b31"] * (time_points - td["t0"]) ** 2
+    else:
+        beta3 = np.full_like(time_points, td["b30"], dtype=float)
+
+    return np.vstack([beta1, beta2, beta3]).T
+
+
+def plot_lambda_distribution(
+    output_dir: Path,
+    results_dir: Path,
+    generator_config: Path,
+) -> None:
+    """Lambda値ごとのβ分布をlambda×共変量グリッドで表示
 
     Args:
         df: 集計結果のDataFrame
         output_dir: プロット保存先ディレクトリ
+        results_dir: result.json を含むディレクトリ
+        generator_config: 真値β(t)の計算用設定
     """
-    fig, ax = plt.subplots(figsize=(12, 6))
+    beta_by_lambda, time_grid = load_beta_results(results_dir)
+    lambdas = sorted(beta_by_lambda.keys())
 
-    # lambda値を文字列に変換してソート
-    df_plot = df.copy()
-    df_plot["lambda_str"] = df_plot["lambda_fuse"].apply(lambda x: f"{x:.4f}")
-    df_plot = df_plot.sort_values("lambda_fuse")
+    time_mid = (time_grid[:-1] + time_grid[1:]) / 2.0
+    true_beta = compute_true_beta(time_mid, generator_config)
 
-    sns.boxplot(data=df_plot, x="lambda_str", y="objective_last", ax=ax)
-    ax.set_xlabel("lambda_fuse")
-    ax.set_ylabel("Objective (last)")
-    ax.set_title("Objective distribution by lambda")
-    ax.tick_params(axis="x", rotation=45)
+    n_rows = len(lambdas)
+    n_cols = 3
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(n_cols * 4.5, n_rows * 2.4),
+        sharex=True,
+    )
 
+    if n_rows == 1:
+        axes = np.array([axes])
+
+    time_spacing = time_mid[1] - time_mid[0] if len(time_mid) > 1 else 0.2
+    box_width = time_spacing * 0.6
+
+    for i, lambda_val in enumerate(lambdas):
+        coef_list = beta_by_lambda[lambda_val]
+        coef_stack = np.stack(coef_list, axis=0)
+        if coef_stack.shape[1] != len(time_mid) or coef_stack.shape[2] < n_cols:
+            continue
+
+        for j in range(n_cols):
+            ax = axes[i, j]
+            box_data = [coef_stack[:, k, j] for k in range(len(time_mid))]
+            ax.boxplot(
+                box_data,
+                positions=time_mid,
+                widths=box_width,
+                showfliers=False,
+                patch_artist=True,
+                boxprops={"facecolor": "#9ecae1", "alpha": 0.7},
+                medianprops={"color": "#08306b", "linewidth": 1.2},
+            )
+            ax.plot(
+                time_mid,
+                true_beta[:, j],
+                color="#e31a1c",
+                linewidth=1.6,
+                label="true",
+            )
+            if i == 0:
+                ax.set_title(f"x{j+1}")
+            if j == 0:
+                ax.set_ylabel(f"lambda={lambda_val:.4g}\nβ")
+            if i == n_rows - 1:
+                ax.set_xlabel("time")
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="upper right")
+
+    fig.suptitle("β(t) distribution by lambda and covariate", y=1.02)
     fig.tight_layout()
     output_path = output_dir / "lambda_distribution.png"
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -145,6 +259,18 @@ def main() -> None:
         default=Path("outputs/lambda_plots"),
         help="プロット保存先ディレクトリ",
     )
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=Path("outputs/lambda_experiments"),
+        help="result.json を含む実験結果ディレクトリ",
+    )
+    parser.add_argument(
+        "--generator-config",
+        type=Path,
+        default=Path("generation/extended_aft_generator.config.json"),
+        help="真値β(t)計算用の生成設定",
+    )
 
     args = parser.parse_args()
 
@@ -159,7 +285,7 @@ def main() -> None:
 
     print("\nGenerating plots...")
     plot_lambda_vs_objective(df, args.output_dir)
-    plot_lambda_distribution(df, args.output_dir)
+    plot_lambda_distribution(args.output_dir, args.results_dir, args.generator_config)
     plot_convergence_vs_lambda(df, args.output_dir)
 
     print(f"\nAll plots saved to: {args.output_dir}")
