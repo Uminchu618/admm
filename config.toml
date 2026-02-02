@@ -58,7 +58,7 @@ newton_steps_per_admm = 1
 
 # max_newton_iter:
 #   (β,γ) 更新の Newton 反復の最大回数。
-max_newton_iter = 3
+max_newton_iter = 50
 
 # newton_tol:
 #   Newton 法の収束判定閾値（勾配ノルムや更新量などの基準に使う想定）。
@@ -67,7 +67,7 @@ newton_tol = 1e-6
 # clip_eta:
 #   exp(η) の発散（overflow）を避けるためのクリッピング幅。
 #   典型的には η を [-clip_eta, clip_eta] に制限して計算を安定化させる。
-clip_eta = 5.0
+clip_eta = 20
 
 # random_state:
 #   初期値生成などで乱数を使う場合のシード。
