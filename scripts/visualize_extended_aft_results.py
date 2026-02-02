@@ -10,18 +10,44 @@ import numpy as np
 import pandas as pd
 
 
-def load_results(input_dir: Path) -> pd.DataFrame:
+def find_result_files(input_dir: Path) -> list[Path]:
+    direct_json = list(sorted(input_dir.glob("*.json")))
+    if direct_json:
+        return direct_json
+    nested_results = list(sorted(input_dir.glob("**/result.json")))
+    return nested_results
+
+
+def extract_seed_from_path(path: Path) -> Optional[int]:
+    for part in path.parts:
+        if part.startswith("extended_aft_seed_"):
+            try:
+                return int(part.split("extended_aft_seed_")[-1])
+            except ValueError:
+                return None
+    stem = path.stem
+    if "seed_" in stem:
+        try:
+            return int(stem.split("seed_")[-1])
+        except ValueError:
+            return None
+    return None
+
+
+def extract_lambda_label(path: Path) -> Optional[str]:
+    for part in path.parts:
+        if part.startswith("lambda_") and part != "lambda_experiments":
+            return part
+    return None
+
+
+def load_results(files: list[Path]) -> pd.DataFrame:
     rows = []
-    for path in sorted(input_dir.glob("*.json")):
+    for path in files:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
-        seed = None
-        stem = path.stem
-        if "seed_" in stem:
-            try:
-                seed = int(stem.split("seed_")[-1])
-            except ValueError:
-                seed = None
+        seed = extract_seed_from_path(path)
+        lambda_label = extract_lambda_label(path)
 
         history = data.get("history", {}) or {}
         summary = data.get("summary", {}) or {}
@@ -33,7 +59,9 @@ def load_results(input_dir: Path) -> pd.DataFrame:
         rows.append(
             {
                 "file": path.name,
+                "path": path,
                 "seed": seed,
+                "lambda": lambda_label,
                 "objective_last": summary.get(
                     "objective_last", objective_hist[-1] if objective_hist else np.nan
                 ),
@@ -50,7 +78,7 @@ def load_results(input_dir: Path) -> pd.DataFrame:
         )
 
     if not rows:
-        raise FileNotFoundError(f"No JSON files found in: {input_dir}")
+        raise FileNotFoundError("No JSON files found.")
 
     df = (
         pd.DataFrame(rows)
@@ -60,8 +88,8 @@ def load_results(input_dir: Path) -> pd.DataFrame:
     return df
 
 
-def load_time_grid(input_dir: Path) -> Optional[np.ndarray]:
-    for path in sorted(input_dir.glob("*.json")):
+def load_time_grid(files: list[Path]) -> Optional[np.ndarray]:
+    for path in files:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         time_grid = data.get("time_grid", None)
@@ -112,7 +140,7 @@ def plot_coef_boxplot_by_k_combined(
 
     coef_rows = []
     for _, row in df.iterrows():
-        path = input_dir / row["file"]
+        path = row["path"]
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         coef = data.get("coef", None)
@@ -144,7 +172,7 @@ def plot_coef_boxplot_by_k_combined(
     if n_features == 0:
         return output_dir / "coef_boxplot_by_k.png"
 
-    time_grid = load_time_grid(input_dir)
+    time_grid = load_time_grid(list(df["path"]))
     true_betas = None
     if time_grid is not None:
         true_betas = compute_true_betas(time_grid, config_path)
@@ -225,16 +253,46 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    df = load_results(args.input_dir)
-    remove_legacy_plots(args.output_dir)
-    output_path = plot_coef_boxplot_by_k_combined(
-        args.input_dir, args.output_dir, df, args.generator_config
-    )
+    input_dir = args.input_dir
+    files = find_result_files(input_dir)
+    if not files and args.input_dir == Path("outputs") / "extended_aft":
+        fallback_dir = Path("outputs") / "lambda_experiments"
+        files = find_result_files(fallback_dir)
+        if files:
+            input_dir = fallback_dir
 
-    if output_path is not None:
-        print(f"Saved plot to: {output_path}")
+    if not files:
+        raise FileNotFoundError(f"No JSON files found in: {input_dir}")
+
+    output_dir = args.output_dir
+    default_output = Path("outputs") / "extended_aft" / "plots"
+    if output_dir == default_output and input_dir != Path("outputs") / "extended_aft":
+        output_dir = input_dir / "plots"
+
+    df = load_results(files)
+
+    if df["lambda"].notna().any():
+        for lambda_label, sub in df.groupby("lambda"):
+            if pd.isna(lambda_label):
+                continue
+            out_dir = output_dir / str(lambda_label)
+            remove_legacy_plots(out_dir)
+            output_path = plot_coef_boxplot_by_k_combined(
+                input_dir, out_dir, sub, args.generator_config
+            )
+            if output_path is not None:
+                print(f"Saved plot to: {output_path}")
+            else:
+                print(f"No coefficients found for {lambda_label}.")
     else:
-        print("No coefficients found. Plot was not generated.")
+        remove_legacy_plots(output_dir)
+        output_path = plot_coef_boxplot_by_k_combined(
+            input_dir, output_dir, df, args.generator_config
+        )
+        if output_path is not None:
+            print(f"Saved plot to: {output_path}")
+        else:
+            print("No coefficients found. Plot was not generated.")
 
 
 if __name__ == "__main__":
