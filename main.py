@@ -103,13 +103,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # 実行パラメータを表示してから実行する。
     print("\n=== Run parameters ===")
-    print({
-        "config_path": str(args.config),
-        "data_path": str(args.data),
-        "output_path": str(args.output) if args.output is not None else None,
-        "plot": bool(args.plot),
-        "config": config,
-    })
+    print(
+        {
+            "config_path": str(args.config),
+            "data_path": str(args.data),
+            "output_path": str(args.output) if args.output is not None else None,
+            "plot": bool(args.plot),
+            "config": config,
+        }
+    )
 
     # 設定辞書から推定器を構築する。
     # 余計なキーや型不一致があれば TypeError が発生し得る。

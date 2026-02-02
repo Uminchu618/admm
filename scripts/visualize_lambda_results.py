@@ -178,6 +178,12 @@ def plot_lambda_distribution(
                 linewidth=1.6,
                 label="true",
             )
+            if j == 0:
+                ax.set_ylim(-2, 2)
+            elif j == 1:
+                ax.set_ylim(0, 2)
+            elif j == 2:
+                ax.set_ylim(-1, 5)
             if i == 0:
                 ax.set_title(f"x{j+1}")
             if j == 0:
