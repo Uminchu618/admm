@@ -90,6 +90,7 @@ class HazardAFTObjective:
                     self.baseline.basis(np.array([x], dtype=float)), dtype=float
                 )
                 h = eta_ik + float(S.reshape(-1) @ gamma_arr)
+                h = float(np.clip(h, -self.clip_eta, self.clip_eta))
                 log_tilde_L += h
 
             # 積分項: - sum_{k<=k(i)} sum_l w exp(h(v))
@@ -106,6 +107,7 @@ class HazardAFTObjective:
                 x = exp_eta[i, k0] * v_arr
                 S = np.asarray(self.baseline.basis(x), dtype=float)
                 h = eta_ik + (S @ gamma_arr)
+                h = np.clip(h, -self.clip_eta, self.clip_eta)
                 log_tilde_L -= float(np.sum(w_arr * np.exp(h)))
 
         # ソルバは最小化するので loss=-log\tilde{L} を返す
@@ -179,6 +181,7 @@ class HazardAFTObjective:
                 factor = 1.0 + x * a_vec
 
                 h = eta_ik + (S @ gamma_arr)
+                h = np.clip(h, -self.clip_eta, self.clip_eta)
                 weights = w_arr * np.exp(h)
                 g_beta[k0] += (weights[:, None] * (factor[:, None] * Xi[None, :])).sum(
                     axis=0
@@ -241,6 +244,7 @@ class HazardAFTObjective:
                 x = exp_eta[i, k0] * v_arr
                 S = np.asarray(self.baseline.basis(x), dtype=float)
                 h = eta_ik + (S @ gamma_arr)
+                h = np.clip(h, -self.clip_eta, self.clip_eta)
                 weights = w_arr * np.exp(h)
                 g += S.T @ weights
 
@@ -325,6 +329,7 @@ class HazardAFTObjective:
                 d2h_scalar = x * a_vec + (x * x) * b_vec
 
                 h = eta_ik + (S @ gamma_arr)
+                h = np.clip(h, -self.clip_eta, self.clip_eta)
                 weights = w_arr * np.exp(h)
 
                 term_d2h = float(np.dot(weights, d2h_scalar)) * Xi_outer
@@ -373,6 +378,7 @@ class HazardAFTObjective:
                 x = exp_eta[i, k0] * v_arr
                 S = np.asarray(self.baseline.basis(x), dtype=float)
                 h = eta_ik + (S @ gamma_arr)
+                h = np.clip(h, -self.clip_eta, self.clip_eta)
                 weights = w_arr * np.exp(h)
                 H += S.T @ (S * weights[:, None])
 
