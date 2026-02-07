@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -9,6 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from scipy.interpolate import make_lsq_spline
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from admm.baseline import BSplineBaseline
 
@@ -32,12 +37,15 @@ def build_estimated_baseline(
     print("Estimated gamma coefficients:", gamma)
     n_basis = int(config.get("n_baseline_basis", gamma.size))
     clip_eta = float(config.get("clip_eta", 20.0))
+    knot_margin = float(config.get("baseline_knot_margin", 1.1))
 
     if n_basis != gamma.size:
         raise ValueError("n_baseline_basis and gamma length must match.")
+    if knot_margin <= 0.0:
+        raise ValueError("baseline_knot_margin must be positive.")
 
     x_min = 0.0
-    x_max = float(time_grid[-1]) * float(np.exp(clip_eta))
+    x_max = float(time_grid[-1]) * knot_margin
     baseline = BSplineBaseline(
         n_basis=n_basis,
         degree=3,

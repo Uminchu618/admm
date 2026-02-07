@@ -55,6 +55,12 @@ def main() -> None:
         raise AssertionError("history_ missing objective")
     if len(fitted.history_["objective"]) == 0:
         raise AssertionError("history_ objective empty")
+    if "best_objective" not in fitted.history_:
+        raise AssertionError("history_ missing best_objective")
+    if "used_best_iterate" not in fitted.history_:
+        raise AssertionError("history_ missing used_best_iterate")
+    if fitted.history_["best_objective"] is None:
+        raise AssertionError("best_objective should not be None in smoke test")
 
     print("OK: ADMMHazardAFT.fit smoke test passed")
 

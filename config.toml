@@ -26,6 +26,12 @@ baseline_basis = "bspline"
 #   大きいほど柔軟だが、過学習・数値不安定（ヘッセの悪条件化など）のリスクが増える。
 n_baseline_basis = 8
 
+# baseline_knot_margin:
+#   BSpline の knot_range 上限を決めるための時刻マージン係数。
+#   x_max = max(max(time), time_grid[-1]) * baseline_knot_margin
+#   clip_eta 由来の極端な上限を使わないことで、基底の定数化を防ぐ。
+baseline_knot_margin = 1.1
+
 # lambda_fuse:
 #   fused lasso 正則化の強さ（区間間差分 Dβ の L1 ペナルティ）。
 #   大きいほど時間方向に "段差の少ない"（変化点の少ない）β になりやすい。
@@ -63,6 +69,22 @@ max_newton_iter = 50
 # newton_tol:
 #   Newton 法の収束判定閾値（勾配ノルムや更新量などの基準に使う想定）。
 newton_tol = 1e-6
+
+# line_search_max_steps:
+#   Newton 更新で Armijo バックトラッキングを行う最大縮小回数。
+line_search_max_steps = 12
+
+# line_search_shrink:
+#   バックトラッキング時の縮小率（0 < shrink < 1）。
+line_search_shrink = 0.5
+
+# line_search_c1:
+#   Armijo 条件の係数。
+line_search_c1 = 1e-4
+
+# return_best_iterate:
+#   ADMM 反復中で最小 objective を与えた反復を最終解として返す。
+return_best_iterate = true
 
 # clip_eta:
 #   exp(η) の発散（overflow）を避けるためのクリッピング幅。
