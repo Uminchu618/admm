@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")" && pwd)"
-data_dir="$repo_root/data/extended_aft"
+data_dir="$repo_root/data/extended_aft_step"
 output_base_dir="$repo_root/outputs/lambda_experiments"
 config_template="$repo_root/config.toml"
 lambda_grid_file="$repo_root/lambda_grid.json"

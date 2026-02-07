@@ -75,17 +75,20 @@ class HazardAFTObjective:
 
         time_grid = np.asarray(self.time_partition.time_grid, dtype=float)
         log_tilde_L = 0.0
+        quad_cache: dict[tuple[int, float], tuple[np.ndarray, np.ndarray]] = {}
 
         for i in range(X_arr.shape[0]):
             ki = int(k_idx[i])  # 1..K
             Ti = float(T_arr[i])
             di = int(delta_arr[i])
+            eta_i = eta[i]
+            exp_eta_i = exp_eta[i]
 
             # イベント項: δ_i h_{i,k(i)}(T_i)
             if di == 1:
                 k0 = ki - 1
-                eta_ik = float(eta[i, k0])
-                x = float(exp_eta[i, k0] * Ti)
+                eta_ik = float(eta_i[k0])
+                x = float(exp_eta_i[k0] * Ti)
                 S = np.asarray(
                     self.baseline.basis(np.array([x], dtype=float)), dtype=float
                 )
@@ -97,14 +100,20 @@ class HazardAFTObjective:
             for k0 in range(ki):
                 a = float(time_grid[k0])
                 b = float(min(Ti, time_grid[k0 + 1]))
-                v, w = self.quadrature.nodes_weights(a, b)
-                v_arr = np.asarray(v, dtype=float)
-                w_arr = np.asarray(w, dtype=float)
+                cache_key = (k0, b)
+                cached = quad_cache.get(cache_key)
+                if cached is None:
+                    v, w = self.quadrature.nodes_weights(a, b)
+                    v_arr = np.asarray(v, dtype=float)
+                    w_arr = np.asarray(w, dtype=float)
+                    quad_cache[cache_key] = (v_arr, w_arr)
+                else:
+                    v_arr, w_arr = cached
                 if w_arr.size == 0:
                     continue
 
-                eta_ik = float(eta[i, k0])
-                x = exp_eta[i, k0] * v_arr
+                eta_ik = float(eta_i[k0])
+                x = exp_eta_i[k0] * v_arr
                 S = np.asarray(self.baseline.basis(x), dtype=float)
                 h = eta_ik + (S @ gamma_arr)
                 h = np.clip(h, -self.clip_eta, self.clip_eta)

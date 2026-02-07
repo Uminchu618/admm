@@ -27,6 +27,18 @@ uv run main.py --config config.toml --data data/simulated_data.csv
 
 ## 基本的な使い方
 
+### データ生成（段階的βの拡張AFT）
+
+段階的に係数が変化する拡張AFTデータを生成します。
+
+```bash
+uv run generation/extended_aft_step_generator.py \
+  --config generation/extended_aft_step_generator.config.json \
+  --output data/simulated_data.csv
+```
+
+設定は [generation/extended_aft_step_generator.config.json](generation/extended_aft_step_generator.config.json) を参照してください。
+
 ### 単一実験の実行
 
 ```bash

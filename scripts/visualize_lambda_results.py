@@ -106,6 +106,20 @@ def compute_true_beta(time_points: np.ndarray, config_path: Path) -> np.ndarray:
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
+    if "stepwise_beta" in cfg:
+        step_cfg = cfg["stepwise_beta"]
+        time_grid = np.asarray(step_cfg["time_grid"], dtype=float)
+
+        def piecewise_beta(levels: list[float]) -> np.ndarray:
+            idx = np.searchsorted(time_grid[1:], time_points, side="right")
+            idx = np.clip(idx, 0, len(levels) - 1)
+            return np.asarray(levels, dtype=float)[idx]
+
+        beta1 = piecewise_beta(step_cfg["beta1_levels"])
+        beta2 = piecewise_beta(step_cfg["beta2_levels"])
+        beta3 = piecewise_beta(step_cfg["beta3_levels"])
+        return np.vstack([beta1, beta2, beta3]).T
+
     td = cfg["time_dependence"]
     scenario = cfg["scenario"]
 
@@ -179,11 +193,11 @@ def plot_lambda_distribution(
                 label="true",
             )
             if j == 0:
-                ax.set_ylim(-2, 2)
+                ax.set_ylim(-1, 2)
             elif j == 1:
-                ax.set_ylim(0, 2)
+                ax.set_ylim(-1, 2)
             elif j == 2:
-                ax.set_ylim(-1, 5)
+                ax.set_ylim(-1, 2)
             if i == 0:
                 ax.set_title(f"x{j+1}")
             if j == 0:
@@ -274,7 +288,7 @@ def main() -> None:
     parser.add_argument(
         "--generator-config",
         type=Path,
-        default=Path("generation/extended_aft_generator.config.json"),
+        default=Path("generation/extended_aft_step_generator.config.json"),
         help="真値β(t)計算用の生成設定",
     )
 
