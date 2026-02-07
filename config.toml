@@ -29,7 +29,7 @@ n_baseline_basis = 8
 # lambda_fuse:
 #   fused lasso 正則化の強さ（区間間差分 Dβ の L1 ペナルティ）。
 #   大きいほど時間方向に "段差の少ない"（変化点の少ない）β になりやすい。
-lambda_fuse = 1.0
+lambda_fuse = 10.0
 
 # rho:
 #   ADMM のペナルティ係数 ρ。
