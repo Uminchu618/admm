@@ -156,6 +156,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
     print({"objective": last_obj, "primal_residual": last_pr, "dual_residual": last_dr})
+    print("\n=== ADMM last z (z_) ===")
+    print(model.z_)
 
     # β の推定値を時間軸でステップ表示（区分一定）
     if args.plot:
@@ -189,6 +191,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "time_grid": list(map(float, time_grid)),
             "coef": coef.tolist(),
             "gamma": model.gamma_.tolist(),
+            "z_last": model.z_.tolist(),
             "history": model.history_,
             "summary": {
                 "objective_last": last_obj,
@@ -209,6 +212,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "objective_last": last_obj,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "z_last": model.z_.tolist(),
             },
             prefix="summary",
         )
