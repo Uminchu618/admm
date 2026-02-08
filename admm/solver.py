@@ -37,6 +37,10 @@ class FusedLassoADMMSolver:
         newton_steps_per_admm: int,
         max_newton_iter: int,
         newton_tol: float,
+        line_search_max_steps: int,
+        line_search_shrink: float,
+        line_search_c1: float,
+        return_best_iterate: bool,
         random_state: Optional[int],
     ) -> None:
         # objective: 近似対数尤度の value と β/γ の勾配・ヘッセを提供する目的関数。
@@ -61,6 +65,12 @@ class FusedLassoADMMSolver:
         # max_newton_iter/newton_tol: (β,γ) 更新での Newton 反復制御。
         self.max_newton_iter = max_newton_iter
         self.newton_tol = newton_tol
+
+        # line_search_*: Newton ステップのバックトラッキング設定。
+        self.line_search_max_steps = line_search_max_steps
+        self.line_search_shrink = line_search_shrink
+        self.line_search_c1 = line_search_c1
+        self.return_best_iterate = return_best_iterate
 
         # random_state: 初期化や乱数を使う場合の再現性のためのシード。
         self.random_state = random_state
@@ -135,6 +145,13 @@ class FusedLassoADMMSolver:
         n_penalized = int(penalized_cols.size)
         diff_len = max(K - 1, 0)
 
+        if int(self.line_search_max_steps) <= 0:
+            raise ValueError("line_search_max_steps は正の整数である必要があります。")
+        if not (0.0 < float(self.line_search_shrink) < 1.0):
+            raise ValueError("line_search_shrink は (0,1) の範囲である必要があります。")
+        if not (0.0 < float(self.line_search_c1) < 1.0):
+            raise ValueError("line_search_c1 は (0,1) の範囲である必要があります。")
+
         def diff_beta(beta_matrix: np.ndarray) -> np.ndarray:
             if diff_len == 0 or n_penalized == 0:
                 return np.zeros((n_penalized, 0), dtype=float)
@@ -153,6 +170,28 @@ class FusedLassoADMMSolver:
 
         def soft_threshold(v: np.ndarray, thresh: float) -> np.ndarray:
             return np.sign(v) * np.maximum(np.abs(v) - thresh, 0.0)
+
+        def safe_base_value(beta_mat: np.ndarray, gamma_vec: np.ndarray) -> float:
+            value = float(
+                self.objective.value(beta_mat, gamma_vec, X_array, T_array, delta_array)
+            )
+            if not np.isfinite(value):
+                return float(np.inf)
+            return value
+
+        def beta_augmented_value(
+            beta_mat: np.ndarray,
+            gamma_vec: np.ndarray,
+            z_mat: np.ndarray,
+            u_mat: np.ndarray,
+        ) -> float:
+            base = safe_base_value(beta_mat, gamma_vec)
+            if not np.isfinite(base):
+                return float(np.inf)
+            if n_penalized > 0 and diff_len > 0:
+                residual = diff_beta(beta_mat) - z_mat + u_mat
+                base += 0.5 * float(self.rho) * float(np.sum(residual * residual))
+            return base
 
         # 初期値: z は Dbeta の値、u はゼロで開始する。
         z = diff_beta(beta)
@@ -187,8 +226,23 @@ class FusedLassoADMMSolver:
             "gamma_step_norm": [],
         }
 
+        d_beta_init = diff_beta(beta)
+        init_obj = safe_base_value(beta, gamma)
+        init_obj += float(self.lambda_fuse * np.sum(np.abs(d_beta_init)))
+        best_objective = float(init_obj)
+        best_beta = beta.copy()
+        best_gamma = gamma.copy()
+        best_z = z.copy()
+        best_u = u.copy()
+        best_iter = -1
+        stopped_due_to_invalid = False
+
         newton_steps = max(1, int(self.newton_steps_per_admm))
         newton_steps = min(newton_steps, max(1, int(self.max_newton_iter)))
+
+        ls_max_steps = int(self.line_search_max_steps)
+        ls_shrink = float(self.line_search_shrink)
+        ls_c1 = float(self.line_search_c1)
 
         for admm_iter in tqdm(
             range(int(self.max_admm_iter)),
@@ -197,10 +251,11 @@ class FusedLassoADMMSolver:
         ):
             beta_step_norm = 0.0
             gamma_step_norm = 0.0
+            invalid_state = False
 
-            # (1) gamma を Newton 更新 → (2) beta を Newton 更新（ブロック座標）
+            # (1) gamma を更新 → (2) beta を更新（ブロック座標）
             for _ in range(newton_steps):
-                # gamma 更新
+                # ----- gamma 更新（Newton + line search） -----
                 g_gamma = self.objective.grad_gamma(
                     beta, gamma, X_array, T_array, delta_array
                 )
@@ -214,18 +269,77 @@ class FusedLassoADMMSolver:
                     raise ValueError("H_gg は正方行列である必要があります。")
                 if h_gg.shape[0] != g_gamma_vec.shape[0]:
                     raise ValueError("H_gg と g_gamma の次元が一致しません。")
+                if np.any(~np.isfinite(h_gg)) or np.any(~np.isfinite(g_gamma_vec)):
+                    invalid_state = True
+                    break
 
-                try:
-                    gamma_step = np.linalg.solve(h_gg, g_gamma_vec)
-                except np.linalg.LinAlgError:
-                    damp = 1e-6
-                    gamma_step = np.linalg.solve(
-                        h_gg + damp * np.eye(h_gg.shape[0]), g_gamma_vec
-                    )
-                gamma = gamma - gamma_step
-                gamma_step_norm = float(np.linalg.norm(gamma_step))
+                gamma_old = gamma.copy()
+                gamma_ref_value = safe_base_value(beta, gamma_old)
 
-                # beta 更新
+                gamma_newton_step = None
+                damp = 0.0
+                eye_gg = np.eye(h_gg.shape[0], dtype=float)
+                for _ in range(6):
+                    try:
+                        gamma_newton_step = np.linalg.solve(
+                            h_gg + damp * eye_gg, g_gamma_vec
+                        )
+                        break
+                    except np.linalg.LinAlgError:
+                        damp = 1e-6 if damp == 0.0 else damp * 10.0
+
+                if gamma_newton_step is None:
+                    gamma_direction = -g_gamma_vec
+                else:
+                    gamma_direction = -gamma_newton_step
+
+                gamma_dir_deriv = float(np.dot(g_gamma_vec, gamma_direction))
+                if (not np.isfinite(gamma_dir_deriv)) or gamma_dir_deriv >= 0.0:
+                    gamma_direction = -g_gamma_vec
+                    gamma_dir_deriv = -float(np.dot(g_gamma_vec, g_gamma_vec))
+
+                gamma_dir_norm = float(np.linalg.norm(gamma_direction))
+                if gamma_dir_norm > 0.0 and np.isfinite(gamma_dir_norm):
+                    step_scale = 1.0
+                    accepted = False
+                    accepted_scale = 0.0
+                    gamma_candidate = gamma_old
+                    for _ in range(ls_max_steps):
+                        cand = gamma_old + step_scale * gamma_direction
+                        cand_value = safe_base_value(beta, cand)
+                        if np.isfinite(cand_value):
+                            if np.isfinite(gamma_ref_value):
+                                if gamma_dir_deriv < 0.0:
+                                    rhs = gamma_ref_value + ls_c1 * step_scale * (
+                                        gamma_dir_deriv
+                                    )
+                                    if cand_value <= rhs:
+                                        accepted = True
+                                elif cand_value <= gamma_ref_value:
+                                    accepted = True
+                            else:
+                                accepted = True
+                        if accepted:
+                            gamma_candidate = cand
+                            accepted_scale = step_scale
+                            break
+                        step_scale *= ls_shrink
+
+                    if accepted:
+                        gamma = gamma_candidate
+                        gamma_step_norm = accepted_scale * gamma_dir_norm
+                    else:
+                        gamma = gamma_old
+                        gamma_step_norm = 0.0
+                else:
+                    gamma = gamma_old
+                    gamma_step_norm = 0.0
+
+                if np.any(~np.isfinite(gamma)):
+                    invalid_state = True
+                    break
+
+                # ----- beta 更新（Newton + line search） -----
                 g_beta = self.objective.grad_beta(
                     beta, gamma, X_array, T_array, delta_array
                 )
@@ -236,6 +350,9 @@ class FusedLassoADMMSolver:
                 g_beta_mat = np.asarray(g_beta, dtype=float)
                 if g_beta_mat.shape != beta.shape:
                     raise ValueError("g_beta の形状が beta と一致しません。")
+                if np.any(~np.isfinite(g_beta_mat)):
+                    invalid_state = True
+                    break
 
                 # ADMM 罰則項の勾配を追加
                 if n_penalized > 0 and diff_len > 0:
@@ -244,7 +361,7 @@ class FusedLassoADMMSolver:
                     for idx, col in enumerate(penalized_cols):
                         g_beta_mat[:, col] += self.rho * dtr[idx]
 
-                # H_bb をフル行列に整形する
+                # H_bb をフル行列に整形
                 h_bb_arr = np.asarray(h_bb, dtype=float)
                 n_beta_total = beta.size
                 if h_bb_arr.ndim == 3 and h_bb_arr.shape == (K, n_beta, n_beta):
@@ -260,6 +377,9 @@ class FusedLassoADMMSolver:
                     h_full = h_bb_arr
                 else:
                     raise ValueError("H_bb の形状が想定と一致しません。")
+                if np.any(~np.isfinite(h_full)):
+                    invalid_state = True
+                    break
 
                 # ADMM 罰則項のヘッセ行列を加算
                 if n_penalized > 0 and diff_len > 0:
@@ -267,24 +387,82 @@ class FusedLassoADMMSolver:
                         idx = np.arange(K) * n_beta + col
                         h_full[np.ix_(idx, idx)] += self.rho * dtd
 
+                beta_old = beta.copy()
+                beta_ref_value = beta_augmented_value(beta_old, gamma, z, u)
                 g_beta_vec = g_beta_mat.reshape(-1)
-                try:
-                    beta_step = np.linalg.solve(h_full, g_beta_vec)
-                except np.linalg.LinAlgError:
-                    damp = 1e-6
-                    beta_step = np.linalg.solve(
-                        h_full + damp * np.eye(h_full.shape[0]), g_beta_vec
-                    )
 
-                beta_step_mat = beta_step.reshape(beta.shape)
-                beta = beta - beta_step_mat
-                beta_step_norm = float(np.linalg.norm(beta_step_mat))
+                beta_newton_step = None
+                damp = 0.0
+                eye_beta = np.eye(h_full.shape[0], dtype=float)
+                for _ in range(6):
+                    try:
+                        beta_newton_step = np.linalg.solve(h_full + damp * eye_beta, g_beta_vec)
+                        break
+                    except np.linalg.LinAlgError:
+                        damp = 1e-6 if damp == 0.0 else damp * 10.0
+
+                if beta_newton_step is None:
+                    beta_direction = -g_beta_mat
+                else:
+                    beta_direction = -beta_newton_step.reshape(beta.shape)
+
+                beta_dir_vec = beta_direction.reshape(-1)
+                beta_dir_deriv = float(np.dot(g_beta_vec, beta_dir_vec))
+                if (not np.isfinite(beta_dir_deriv)) or beta_dir_deriv >= 0.0:
+                    beta_direction = -g_beta_mat
+                    beta_dir_vec = beta_direction.reshape(-1)
+                    beta_dir_deriv = -float(np.dot(g_beta_vec, g_beta_vec))
+
+                beta_dir_norm = float(np.linalg.norm(beta_dir_vec))
+                if beta_dir_norm > 0.0 and np.isfinite(beta_dir_norm):
+                    step_scale = 1.0
+                    accepted = False
+                    accepted_scale = 0.0
+                    beta_candidate = beta_old
+                    for _ in range(ls_max_steps):
+                        cand = beta_old + step_scale * beta_direction
+                        cand_value = beta_augmented_value(cand, gamma, z, u)
+                        if np.isfinite(cand_value):
+                            if np.isfinite(beta_ref_value):
+                                if beta_dir_deriv < 0.0:
+                                    rhs = beta_ref_value + ls_c1 * step_scale * (
+                                        beta_dir_deriv
+                                    )
+                                    if cand_value <= rhs:
+                                        accepted = True
+                                elif cand_value <= beta_ref_value:
+                                    accepted = True
+                            else:
+                                accepted = True
+                        if accepted:
+                            beta_candidate = cand
+                            accepted_scale = step_scale
+                            break
+                        step_scale *= ls_shrink
+
+                    if accepted:
+                        beta = beta_candidate
+                        beta_step_norm = accepted_scale * beta_dir_norm
+                    else:
+                        beta = beta_old
+                        beta_step_norm = 0.0
+                else:
+                    beta = beta_old
+                    beta_step_norm = 0.0
+
+                if np.any(~np.isfinite(beta)):
+                    invalid_state = True
+                    break
 
                 if (
                     beta_step_norm < self.newton_tol
                     and gamma_step_norm < self.newton_tol
                 ):
                     break
+
+            if invalid_state:
+                stopped_due_to_invalid = True
+                break
 
             # z 更新（prox）
             z_prev = z.copy()
@@ -305,11 +483,10 @@ class FusedLassoADMMSolver:
                 dual_residual = 0.0
 
             # 履歴を記録（目的関数は最小化対象として扱う）
-            base_value = float(
-                self.objective.value(beta, gamma, X_array, T_array, delta_array)
-            )
+            base_value = safe_base_value(beta, gamma)
             penalty = float(self.lambda_fuse * np.sum(np.abs(d_beta)))
-            history["objective"].append(base_value + penalty)
+            total_objective = base_value + penalty
+            history["objective"].append(total_objective)
             history["primal_residual"].append(primal_residual)
             history["dual_residual"].append(dual_residual)
             history["rho"].append(float(self.rho))
@@ -317,10 +494,38 @@ class FusedLassoADMMSolver:
             history["beta_step_norm"].append(beta_step_norm)
             history["gamma_step_norm"].append(gamma_step_norm)
 
+            if np.isfinite(total_objective) and total_objective < best_objective:
+                best_objective = float(total_objective)
+                best_beta = beta.copy()
+                best_gamma = gamma.copy()
+                best_z = z.copy()
+                best_u = u.copy()
+                best_iter = int(admm_iter)
+
             if (
                 primal_residual <= self.admm_tol_primal
                 and dual_residual <= self.admm_tol_dual
             ):
                 break
 
-        return beta, gamma, z, u, history
+        if bool(self.return_best_iterate) and np.isfinite(best_objective):
+            beta_out = best_beta
+            gamma_out = best_gamma
+            z_out = best_z
+            u_out = best_u
+            used_best_iterate = True
+        else:
+            beta_out = beta
+            gamma_out = gamma
+            z_out = z
+            u_out = u
+            used_best_iterate = False
+
+        history["best_objective"] = (
+            float(best_objective) if np.isfinite(best_objective) else None
+        )
+        history["best_iter"] = int(best_iter) if best_iter >= 0 else None
+        history["used_best_iterate"] = used_best_iterate
+        history["stopped_due_to_invalid"] = bool(stopped_due_to_invalid)
+
+        return beta_out, gamma_out, z_out, u_out, history

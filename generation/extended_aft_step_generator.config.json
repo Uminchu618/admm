@@ -40,7 +40,8 @@
     "censoring": {
         "admin_time": 6.0,
         "random_a": 1.0,
-        "random_b": 8.0
+        "random_b": 8.0,
+        "random_enabled": false
     },
     "grid": {
         "dt": 0.0003,

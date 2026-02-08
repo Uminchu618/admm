@@ -56,6 +56,7 @@ class ADMMHazardAFT:
         time_grid: Sequence[float],
         baseline_basis: str = "bspline",
         n_baseline_basis: int = 10,
+        baseline_knot_margin: float = 1.1,
         quadrature: Optional[Dict[str, Any]] = None,
         lambda_fuse: float = 1.0,
         rho: float = 1.0,
@@ -65,6 +66,10 @@ class ADMMHazardAFT:
         newton_steps_per_admm: int = 1,
         max_newton_iter: int = 50,
         newton_tol: float = 1e-6,
+        line_search_max_steps: int = 12,
+        line_search_shrink: float = 0.5,
+        line_search_c1: float = 1e-4,
+        return_best_iterate: bool = True,
         clip_eta: float = 20.0,
         random_state: Optional[int] = None,
     ) -> None:
@@ -72,6 +77,7 @@ class ADMMHazardAFT:
         self.time_grid = time_grid
         self.baseline_basis = baseline_basis
         self.n_baseline_basis = n_baseline_basis
+        self.baseline_knot_margin = baseline_knot_margin
         self.quadrature = quadrature
         self.lambda_fuse = lambda_fuse
         self.rho = rho
@@ -81,6 +87,10 @@ class ADMMHazardAFT:
         self.newton_steps_per_admm = newton_steps_per_admm
         self.max_newton_iter = max_newton_iter
         self.newton_tol = newton_tol
+        self.line_search_max_steps = line_search_max_steps
+        self.line_search_shrink = line_search_shrink
+        self.line_search_c1 = line_search_c1
+        self.return_best_iterate = return_best_iterate
         self.clip_eta = clip_eta
         self.random_state = random_state
 
@@ -134,7 +144,7 @@ class ADMMHazardAFT:
         self.time_grid_ = tuple(self.time_grid)
 
         # 内部コンポーネント（baseline/time_partition/quadrature/objective/solver）を構築する。
-        components = self._build_components()
+        components = self._build_components(T)
 
         # パラメータ初期値（β, γ）を用意する。
         # ここでの初期化は数値安定性に影響する可能性がある。
@@ -332,11 +342,11 @@ class ADMMHazardAFT:
 
         return beta0, gamma0
 
-    def _build_components(self) -> _FitComponents:
+    def _build_components(self, T: ArrayLike) -> _FitComponents:
         """学習に必要な内部コンポーネントを構築する。"""
 
         # ベースライン（基底）モデルを選択して生成する。
-        baseline = self._build_baseline_model()
+        baseline = self._build_baseline_model(T)
 
         # 時間分割: time_grid をもとに区間情報や η の計算を担う。
         time_partition = TimePartition(self.time_grid)
@@ -363,6 +373,10 @@ class ADMMHazardAFT:
             newton_steps_per_admm=self.newton_steps_per_admm,
             max_newton_iter=self.max_newton_iter,
             newton_tol=self.newton_tol,
+            line_search_max_steps=self.line_search_max_steps,
+            line_search_shrink=self.line_search_shrink,
+            line_search_c1=self.line_search_c1,
+            return_best_iterate=self.return_best_iterate,
             random_state=self.random_state,
         )
 
@@ -375,19 +389,32 @@ class ADMMHazardAFT:
             solver=solver,
         )
 
-    def _build_baseline_model(self) -> BaselineHazardModel:
+    def _build_baseline_model(self, T: ArrayLike) -> BaselineHazardModel:
         """baseline_basis の指定に従ってベースラインモデルを生成する。"""
 
         # baseline_basis の分岐は将来の拡張ポイント。
         if self.baseline_basis == "bspline":
             # B-spline を選択した場合、基底数 n_baseline_basis を渡して生成する。
             # knots が未指定の場合、baseline 側で open uniform knots を生成する。
-            # その範囲はまず time_grid の [t0, tK] を採用する（高速化/自動調整は将来）。
+            # ノット範囲は clip_eta ではなく、観測時刻のレンジに安全マージンを掛けて決める。
             time_grid = getattr(self, "time_grid_", self.time_grid)
-            # z = exp(eta) * t を評価するため、clip_eta に基づく上限までカバーする。
-            # exp(eta) は objective 側で eta を [-clip_eta, clip_eta] にクリップしている。
+            T_array = np.asarray(T, dtype=float).reshape(-1)
+            if T_array.size == 0:
+                raise ValueError("T は空であってはいけません。")
+            if np.any(~np.isfinite(T_array)):
+                raise ValueError("T に NaN/inf が含まれています。")
+            margin = float(self.baseline_knot_margin)
+            if margin <= 0.0:
+                raise ValueError("baseline_knot_margin は正の値である必要があります。")
+
             x_min = 0.0
-            x_max = float(time_grid[-1]) * float(np.exp(self.clip_eta))
+            t_ref = max(float(np.max(T_array)), float(time_grid[-1]))
+            x_max = t_ref * margin
+            if x_max <= x_min:
+                raise ValueError("baseline の knot_range が不正です（x_max <= x_min）。")
+
+            # 学習後に診断しやすいよう、実際に使ったノット範囲を保持する。
+            self.baseline_knot_range_ = (x_min, x_max)
             return BSplineBaseline(
                 n_basis=self.n_baseline_basis,
                 degree=3,

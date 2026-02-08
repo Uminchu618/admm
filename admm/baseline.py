@@ -211,6 +211,13 @@ class BSplineBaseline(BaselineHazardModel):
         return x_array
 
     def _design_matrix(self, x: np.ndarray, degree: int) -> np.ndarray:
+        if not self.extrapolate:
+            # extrapolate=False では定義域外が NaN になるため、
+            # 数値最適化の安定性を優先して端点にクリップする。
+            x_min = float(self.knots[degree])
+            x_max = float(self.knots[-degree - 1])
+            x = np.clip(x, x_min, x_max)
+
         spline = self._spline_cache.get(degree)
         if spline is None:
             n_basis = len(self.knots) - degree - 1

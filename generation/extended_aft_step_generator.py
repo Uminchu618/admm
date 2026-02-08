@@ -43,6 +43,7 @@ class CensoringParams:
     admin_time: float
     random_a: float
     random_b: float
+    random_enabled: bool = True
 
 
 @dataclass
@@ -138,7 +139,13 @@ class ExtendedAFTStepGenerator:
 
         rng = np.random.default_rng(self.seed + 1)
         c1 = np.full(self.n, self.censoring.admin_time)
-        c2 = rng.uniform(self.censoring.random_a, self.censoring.random_b, size=self.n)
+
+        if self.censoring.random_enabled:
+            c2 = rng.uniform(
+                self.censoring.random_a, self.censoring.random_b, size=self.n
+            )
+        else:
+            c2 = np.full(self.n, np.inf)
         t_obs = np.minimum.reduce([t_true, c1, c2])
         event = (t_true <= c1) & (t_true <= c2)
 
@@ -179,6 +186,7 @@ def build_generator(cfg: Dict) -> ExtendedAFTStepGenerator:
         admin_time=censor_cfg["admin_time"],
         random_a=censor_cfg["random_a"],
         random_b=censor_cfg["random_b"],
+        random_enabled=censor_cfg.get("random_enabled", False),
     )
     grid = GridParams(
         dt=grid_cfg["dt"],
