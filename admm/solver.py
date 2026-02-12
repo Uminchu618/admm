@@ -122,10 +122,8 @@ class FusedLassoADMMSolver:
             raise ValueError("beta0 は 2 次元配列である必要があります。")
         if gamma.ndim != 1:
             raise ValueError("gamma0 は 1 次元配列である必要があります。")
-        if X_array.ndim == 1:
-            X_array = X_array.reshape(-1, 1)
-        if X_array.ndim != 2:
-            raise ValueError("X は 2 次元配列である必要があります。")
+        if X_array.ndim != 3:
+            raise ValueError("X は 3 次元配列である必要があります。")
         if T_array.ndim != 1:
             raise ValueError("T は 1 次元配列である必要があります。")
         if delta_array.ndim != 1:
@@ -134,13 +132,12 @@ class FusedLassoADMMSolver:
             raise ValueError("X, T, delta のサンプル数が一致しません。")
 
         K, n_beta = beta.shape
-        n_features = X_array.shape[1]
-        if n_beta == n_features + 1:
-            penalized_cols = np.arange(1, n_beta)
-        elif n_beta == n_features:
-            penalized_cols = np.arange(n_beta)
-        else:
+        if X_array.shape[1] != K:
+            raise ValueError("X の K 次元が beta と一致しません。")
+        n_features = X_array.shape[2]
+        if n_beta != n_features:
             raise ValueError("beta0 の列数が X の特徴量数と整合しません。")
+        penalized_cols = np.arange(n_beta)
 
         n_penalized = int(penalized_cols.size)
         diff_len = max(K - 1, 0)
@@ -396,7 +393,9 @@ class FusedLassoADMMSolver:
                 eye_beta = np.eye(h_full.shape[0], dtype=float)
                 for _ in range(6):
                     try:
-                        beta_newton_step = np.linalg.solve(h_full + damp * eye_beta, g_beta_vec)
+                        beta_newton_step = np.linalg.solve(
+                            h_full + damp * eye_beta, g_beta_vec
+                        )
                         break
                     except np.linalg.LinAlgError:
                         damp = 1e-6 if damp == 0.0 else damp * 10.0

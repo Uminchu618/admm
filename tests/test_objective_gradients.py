@@ -65,12 +65,12 @@ def main() -> None:
     K = 2
     time_grid = [0.0, 1.0, 2.0]
 
-    X = rng.normal(size=(n, p))
+    X = rng.normal(size=(n, K, p))
     T = rng.uniform(0.05, 1.95, size=n)
     delta = rng.integers(0, 2, size=n).astype(int)
 
-    # beta は intercept 込み (K, p+1)
-    beta = rng.normal(scale=0.1, size=(K, p + 1))
+    # beta は切片なし (K, p)
+    beta = rng.normal(scale=0.1, size=(K, p))
 
     # baseline の knots は x=exp(eta)*t の範囲をカバーするよう広めに取る
     # ここでは eta を小さくしているので exp(eta) は概ね ~[0.7, 1.4] 程度。
@@ -138,7 +138,7 @@ def main() -> None:
 
     # --- Hessian の方向微分チェック（beta, block diagonal） ---
     H_bb = obj.hess_beta(beta, gamma, X, T, delta)
-    if H_bb.shape != (K, p + 1, p + 1):
+    if H_bb.shape != (K, p, p):
         raise AssertionError(f"H_bb shape mismatch: {H_bb.shape}")
 
     d = rng.normal(size=beta.shape)

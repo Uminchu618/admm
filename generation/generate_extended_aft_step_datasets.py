@@ -1,5 +1,6 @@
 import argparse
 import copy
+import json
 import sys
 from pathlib import Path
 from typing import Dict
@@ -34,6 +35,11 @@ def generate_datasets(
             continue
 
         df.to_csv(output_path, index=False)
+        meta_path = output_path.with_suffix(output_path.suffix + ".meta.json")
+        meta_path.write_text(
+            json.dumps({"time_grid": generator.step_params.time_grid}, indent=2),
+            encoding="utf-8",
+        )
         print(f"saved: {output_path}")
 
 

@@ -47,5 +47,8 @@
         "dt": 0.0003,
         "epsilon": 0.001,
         "t_max": 8.0
+    },
+    "interval_covariates": {
+        "noise_scale": 0.1
     }
 }
