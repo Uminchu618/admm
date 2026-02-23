@@ -145,18 +145,15 @@ class HazardAFTObjective:
         )
 
         time_grid = np.asarray(self.time_partition.time_grid, dtype=float)
-        n, _ = X_arr.shape
+        n = X_arr.shape[0]
         K, p_beta = beta_arr.shape
 
-        X_design = self._design_matrix_for_beta(beta_arr, X_arr)
         g_beta = np.zeros((K, p_beta), dtype=float)
 
         for i in range(n):
             ki = int(k_idx[i])
             Ti = float(T_arr[i])
             di = int(delta_arr[i])
-            Xi = X_design[i]
-
             # イベント項: -δ_i * ∂h/∂β （loss の符号）
             if di == 1:
                 k0 = ki - 1
@@ -168,6 +165,7 @@ class HazardAFTObjective:
                 )
                 a = float(S1.reshape(-1) @ gamma_arr)
                 factor = 1.0 + x * a
+                Xi = X_arr[i, k0]
                 g_beta[k0] -= Xi * factor
 
             # 積分項: + sum w exp(h) * ∂h/∂β （loss の符号）
@@ -192,6 +190,7 @@ class HazardAFTObjective:
                 h = eta_ik + (S @ gamma_arr)
                 h = np.clip(h, -self.clip_eta, self.clip_eta)
                 weights = w_arr * np.exp(h)
+                Xi = X_arr[i, k0]
                 g_beta[k0] += (weights[:, None] * (factor[:, None] * Xi[None, :])).sum(
                     axis=0
                 )
@@ -284,17 +283,12 @@ class HazardAFTObjective:
         time_grid = np.asarray(self.time_partition.time_grid, dtype=float)
         n = X_arr.shape[0]
         K, p_beta = beta_arr.shape
-        X_design = self._design_matrix_for_beta(beta_arr, X_arr)
-
         H = np.zeros((K, p_beta, p_beta), dtype=float)
 
         for i in range(n):
             ki = int(k_idx[i])
             Ti = float(T_arr[i])
             di = int(delta_arr[i])
-            Xi = X_design[i]
-            Xi_outer = np.outer(Xi, Xi)
-
             # イベント項（k=k(i) のみ）: loss では -δ_i * ∂^2 h /∂β^2
             if di == 1:
                 k0 = ki - 1
@@ -311,6 +305,8 @@ class HazardAFTObjective:
                 a = float(S1.reshape(-1) @ gamma_arr)
                 b = float(S2.reshape(-1) @ gamma_arr)
                 scalar = x * a + (x * x) * b
+                Xi = X_arr[i, k0]
+                Xi_outer = np.outer(Xi, Xi)
                 H[k0] -= Xi_outer * scalar
 
             # 積分項: loss では + sum w exp(h) * (∂^2 h + (∂h)(∂h)^T)
@@ -334,6 +330,8 @@ class HazardAFTObjective:
                 a_vec = S1 @ gamma_arr
                 b_vec = S2 @ gamma_arr
                 dh_factor = 1.0 + x * a_vec
+                Xi = X_arr[i, k0]
+                Xi_outer = np.outer(Xi, Xi)
                 dh = dh_factor[:, None] * Xi[None, :]
                 d2h_scalar = x * a_vec + (x * x) * b_vec
 
@@ -441,8 +439,6 @@ class HazardAFTObjective:
         beta_arr = np.asarray(beta, dtype=float)
         gamma_arr = np.asarray(gamma, dtype=float).reshape(-1)
         X_arr = np.asarray(X, dtype=float)
-        if X_arr.ndim == 1:
-            X_arr = X_arr.reshape(-1, 1)
         T_arr = np.asarray(T, dtype=float).reshape(-1)
         delta_arr = np.asarray(delta, dtype=int).reshape(-1)
 
@@ -450,8 +446,8 @@ class HazardAFTObjective:
             raise ValueError("beta は 2 次元配列である必要があります")
         if gamma_arr.ndim != 1:
             raise ValueError("gamma は 1 次元配列である必要があります")
-        if X_arr.ndim != 2:
-            raise ValueError("X は 2 次元配列である必要があります")
+        if X_arr.ndim != 3:
+            raise ValueError("X は 3 次元配列である必要があります")
         if T_arr.ndim != 1 or delta_arr.ndim != 1:
             raise ValueError("T, delta は 1 次元配列である必要があります")
         if not (X_arr.shape[0] == T_arr.shape[0] == delta_arr.shape[0]):
@@ -462,6 +458,11 @@ class HazardAFTObjective:
             raise ValueError("X/T に NaN/inf が含まれています")
         if np.any((delta_arr != 0) & (delta_arr != 1)):
             raise ValueError("delta は 0/1 である必要があります")
+
+        if X_arr.shape[1] != beta_arr.shape[0]:
+            raise ValueError("X の K 次元が beta と一致しません")
+        if X_arr.shape[2] != beta_arr.shape[1]:
+            raise ValueError("X の特徴量数が beta と一致しません")
 
         # time partition から η を組み立て、clip_eta で η をクリップする。
         eta = np.asarray(self.time_partition.eta(beta_arr, X_arr), dtype=float)
@@ -474,10 +475,8 @@ class HazardAFTObjective:
     def _design_matrix_for_beta(
         self, beta_arr: np.ndarray, X_arr: np.ndarray
     ) -> np.ndarray:
-        n_beta = beta_arr.shape[1]
-        n, p = X_arr.shape
-        if n_beta == p + 1:
-            return np.column_stack([np.ones(n, dtype=float), X_arr])
-        if n_beta == p:
-            return X_arr
-        raise ValueError("beta の列数が X と整合しません")
+        if X_arr.ndim != 3:
+            raise ValueError("X は 3 次元配列である必要があります")
+        if beta_arr.shape[1] != X_arr.shape[2]:
+            raise ValueError("beta の列数が X と整合しません")
+        return X_arr

@@ -17,12 +17,12 @@ def main() -> None:
     n = 12
     p = 2
 
-    X = rng.normal(size=(n, p))
+    time_grid = [0.0, 1.0, 2.0]
+    K = len(time_grid) - 1
+    X = rng.normal(size=(n, K, p))
     T = rng.uniform(0.05, 1.95, size=n)
     delta = rng.integers(0, 2, size=n).astype(int)
     y = np.column_stack([T, delta])
-
-    time_grid = [0.0, 1.0, 2.0]
 
     model = ADMMHazardAFT(
         time_grid=time_grid,

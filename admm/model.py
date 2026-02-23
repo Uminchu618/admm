@@ -135,13 +135,13 @@ class ADMMHazardAFT:
         """
 
         # 入力検証: X と y を整形し、観測時刻 T と打ち切り指示 delta に分解する。
-        X, T, delta = self._validate_inputs(X, y)
+        X, T, delta, time_grid_effective = self._validate_inputs(X, y)
 
         # 入力次元（特徴量数）を保持する。
-        self.n_features_in_ = int(X.shape[1])
+        self.n_features_in_ = int(X.shape[2])
 
-        # time_grid を tuple 化して不変にし、学習後属性として保持する。
-        self.time_grid_ = tuple(self.time_grid)
+        # time_grid を有効区間に合わせて保持する。
+        self.time_grid_ = tuple(time_grid_effective)
 
         # 内部コンポーネント（baseline/time_partition/quadrature/objective/solver）を構築する。
         components = self._build_components(T)
@@ -229,7 +229,7 @@ class ADMMHazardAFT:
 
     def _validate_inputs(
         self, X: ArrayLike, y: ArrayLike
-    ) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
+    ) -> Tuple[ArrayLike, ArrayLike, ArrayLike, Tuple[float, ...]]:
         """入力検証と前処理を行い、(X, T, delta) に分解して返す。
 
         本メソッドは「学習用に最低限必要な形・値の妥当性」を確認する。
@@ -237,8 +237,8 @@ class ADMMHazardAFT:
 
         行う検証・変換:
         - X:
-            - 1 次元なら (n, 1) に reshape（単一特徴量を想定）
-            - 2 次元でない場合は ValueError
+            - (n, K, p) を要求
+            - K が time_grid と異なる場合は min(K) に切り詰める
         - y:
             - (n, 2) 形式（time, event）であることを要求
             - time 列は float へ変換可能で、有限（NaN/inf なし）かつ非負であること
@@ -247,27 +247,27 @@ class ADMMHazardAFT:
               - 戻り値では int にキャストして返す
 
         Args:
-            X: 特徴量。形状 (n, p) を想定（1 次元は (n, 1) とみなす）。
+            X: 特徴量。形状 (n, K, p) を要求。
             y: 目的変数。形状 (n, 2) を要求（1列目=観測時刻 time, 2列目=イベント指示 event）。
 
         Returns:
-            (X_array, T, delta)
-            - X_array: 形状 (n, p) の NumPy 配列
+            (X_array, T, delta, time_grid_effective)
+            - X_array: 形状 (n, K, p) の NumPy 配列
             - T: 形状 (n,) の float 配列（観測時刻）
             - delta: 形状 (n,) の int 配列（0/1）
+            - time_grid_effective: 有効区間に切り詰めた time_grid
 
         Raises:
             ValueError: 形状不正、型変換不能、NaN/inf、負の time、event が 0/1 以外、など。
         """
 
         # X を NumPy 配列に正規化する（リスト/タプル等も受け取れるようにするため）。
-        X_array = np.asarray(X)
+        X_array = np.asarray(X, dtype=float)
 
-        # 1 次元入力は「単一特徴量」とみなし、(n, 1) に整形する。
-        if X_array.ndim == 1:
-            X_array = X_array.reshape(-1, 1)
-        elif X_array.ndim != 2:
-            raise ValueError("X は 2 次元配列（n, p）である必要があります。")
+        if X_array.ndim != 3:
+            raise ValueError("X は 3 次元配列（n, K, p）である必要があります。")
+        if np.any(~np.isfinite(X_array)):
+            raise ValueError("X に無限大または NaN が含まれています。")
 
         # y も NumPy 配列に正規化し、(n, 2) 形式であることを要求する。
         # （time, event）の2列を前提に分解するため。
@@ -277,6 +277,18 @@ class ADMMHazardAFT:
         # サンプル数（行数）が一致しない場合は、入力対応が壊れているためエラー。
         if X_array.shape[0] != y_array.shape[0]:
             raise ValueError("X と y の行数が一致しません。")
+
+        time_grid = tuple(float(t) for t in self.time_grid)
+        if len(time_grid) < 2:
+            raise ValueError("time_grid は 2 点以上である必要があります。")
+        k_expected = len(time_grid) - 1
+        k_data = int(X_array.shape[1])
+        k_effective = min(k_expected, k_data)
+        if k_effective <= 0:
+            raise ValueError("K は 1 以上である必要があります。")
+        if k_data != k_effective:
+            X_array = X_array[:, :k_effective, :]
+        time_grid_effective = time_grid[: k_effective + 1]
         # time 列を float に変換する。変換不能（文字列等）の場合は例外を握りつぶさず原因を付与する。
         try:
             T = y_array[:, 0].astype(float)
@@ -301,7 +313,7 @@ class ADMMHazardAFT:
         if not np.all(np.isin(unique, [0, 1])):
             raise ValueError("event は 0/1 の二値である必要があります。")
         # 下流（尤度計算・最適化）で扱いやすいよう、event は int（0/1）へ正規化して返す。
-        return X_array, T, delta.astype(int)
+        return X_array, T, delta.astype(int), time_grid_effective
 
     def _initialize_params(
         self, X: ArrayLike, T: ArrayLike, delta: ArrayLike
@@ -319,15 +331,15 @@ class ADMMHazardAFT:
             ValueError: time_grid の長さや基底数が不正な場合。
         """
         X_array = np.asarray(X)
-        if X_array.ndim != 2:
-            raise ValueError("X は 2 次元配列（n, p）である必要があります。")
+        if X_array.ndim != 3:
+            raise ValueError("X は 3 次元配列（n, K, p）である必要があります。")
 
         time_grid = getattr(self, "time_grid_", self.time_grid)
         K = len(time_grid) - 1
         if K <= 0:
             raise ValueError("time_grid は 2 点以上を含む必要があります。")
 
-        n_features = X_array.shape[1]
+        n_features = X_array.shape[2]
         beta0 = np.zeros((K, n_features), dtype=float)
 
         n_basis = int(self.n_baseline_basis)
@@ -349,7 +361,8 @@ class ADMMHazardAFT:
         baseline = self._build_baseline_model(T)
 
         # 時間分割: time_grid をもとに区間情報や η の計算を担う。
-        time_partition = TimePartition(self.time_grid)
+        time_grid = getattr(self, "time_grid_", self.time_grid)
+        time_partition = TimePartition(time_grid)
 
         # 求積ルール: 区間積分を Q 点の加重和として近似する。
         quadrature = QuadratureRule(self.quadrature)
@@ -411,7 +424,9 @@ class ADMMHazardAFT:
             t_ref = max(float(np.max(T_array)), float(time_grid[-1]))
             x_max = t_ref * margin
             if x_max <= x_min:
-                raise ValueError("baseline の knot_range が不正です（x_max <= x_min）。")
+                raise ValueError(
+                    "baseline の knot_range が不正です（x_max <= x_min）。"
+                )
 
             # 学習後に診断しやすいよう、実際に使ったノット範囲を保持する。
             self.baseline_knot_range_ = (x_min, x_max)

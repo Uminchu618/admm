@@ -115,7 +115,7 @@ class TimePartition:
         """線形予測子 η を計算する（未実装）。
 
         想定:
-            β を (K, p) とし、X を (n, p) とすると、η は (n, K) の行列になる。
+            β を (K, p) とし、X を (n, K, p) とすると、η は (n, K) の行列になる。
 
         Args:
             beta: 時間区間ごとの係数。
@@ -132,10 +132,8 @@ class TimePartition:
 
         if beta_arr.ndim != 2:
             raise ValueError("beta は 2 次元配列である必要があります")
-        if X_arr.ndim == 1:
-            X_arr = X_arr.reshape(-1, 1)
-        if X_arr.ndim != 2:
-            raise ValueError("X は 2 次元配列である必要があります")
+        if X_arr.ndim != 3:
+            raise ValueError("X は 3 次元配列である必要があります")
         if np.any(~np.isfinite(beta_arr)) or np.any(~np.isfinite(X_arr)):
             raise ValueError("beta または X に NaN/inf が含まれています")
 
@@ -144,10 +142,11 @@ class TimePartition:
         if K != K_expected:
             raise ValueError("beta の行数（K）が time_grid と一致しません")
 
-        n_samples, n_features = X_arr.shape
+        n_samples, k_data, n_features = X_arr.shape
+        if k_data != K:
+            raise ValueError("X の K 次元が beta/time_grid と一致しません")
         if n_beta != n_features:
             raise ValueError("beta の列数が X の特徴量数と整合しません")
-        X_design = X_arr
 
-        # (n, p_beta) @ (p_beta, K) -> (n, K)
-        return X_design @ beta_arr.T
+        # (n, K, p) と (K, p) の内積で (n, K)
+        return np.einsum("nkp,kp->nk", X_arr, beta_arr)

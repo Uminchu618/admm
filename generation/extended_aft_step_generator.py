@@ -53,6 +53,11 @@ class GridParams:
     t_max: float
 
 
+@dataclass
+class IntervalCovariatesParams:
+    noise_scale: float = 0.0
+
+
 class ExtendedAFTStepGenerator:
     def __init__(
         self,
@@ -62,6 +67,7 @@ class ExtendedAFTStepGenerator:
         step_params: StepwiseBetaParams,
         censoring: CensoringParams,
         grid: GridParams,
+        interval_covariates: IntervalCovariatesParams,
         seed: int = 42,
     ):
         if x23_dist not in ("normal", "uniform"):
@@ -75,6 +81,7 @@ class ExtendedAFTStepGenerator:
         self.step_params = step_params
         self.censoring = censoring
         self.grid = grid
+        self.interval_covariates = interval_covariates
         self.seed = seed
 
     def _piecewise_beta(self, t: np.ndarray, levels: List[float]) -> np.ndarray:
@@ -108,6 +115,22 @@ class ExtendedAFTStepGenerator:
             x2 = rng.uniform(-1.0, 1.0, size=self.n)
             x3 = rng.uniform(-1.0, 1.0, size=self.n)
         return x1, x2, x3
+
+    def expand_interval_covariates(
+        self, x1: np.ndarray, x2: np.ndarray, x3: np.ndarray
+    ) -> np.ndarray:
+        k = len(self.step_params.time_grid) - 1
+        base = np.stack([x1, x2, x3], axis=1)
+        base = base[:, None, :]
+        base = np.repeat(base, k, axis=1)
+
+        noise_scale = float(self.interval_covariates.noise_scale)
+        if noise_scale <= 0.0:
+            return base
+
+        rng = np.random.default_rng(self.seed + 10)
+        noise = rng.normal(0.0, noise_scale, size=base.shape)
+        return base + noise
 
     def _hazard(self, t: np.ndarray, x1: float, g2: float, g3: float) -> np.ndarray:
         eta = self._beta1(t) * x1 + self._beta2(t) * g2 + self._beta3(t) * g3
@@ -149,16 +172,24 @@ class ExtendedAFTStepGenerator:
         t_obs = np.minimum.reduce([t_true, c1, c2])
         event = (t_true <= c1) & (t_true <= c2)
 
+        x_interval = self.expand_interval_covariates(x1, x2, x3)
+        n, k, p = x_interval.shape
+        ids = np.repeat(np.arange(n), k)
+        interval_index = np.tile(np.arange(k), n)
+        x_long = x_interval.reshape(n * k, p)
+
         df = pd.DataFrame(
             {
-                "x1": x1,
-                "x2": x2,
-                "x3": x3,
-                "time": t_obs,
-                "event": event.astype(int),
-                "time_true": t_true,
-                "c1": c1,
-                "c2": c2,
+                "id": ids,
+                "k": interval_index,
+                "x1": x_long[:, 0],
+                "x2": x_long[:, 1],
+                "x3": x_long[:, 2],
+                "time": np.repeat(t_obs, k),
+                "event": np.repeat(event.astype(int), k),
+                "time_true": np.repeat(t_true, k),
+                "c1": np.repeat(c1, k),
+                "c2": np.repeat(c2, k),
             }
         )
         return df
@@ -174,6 +205,7 @@ def build_generator(cfg: Dict) -> ExtendedAFTStepGenerator:
     step_cfg = cfg["stepwise_beta"]
     censor_cfg = cfg["censoring"]
     grid_cfg = cfg["grid"]
+    interval_cfg = cfg.get("interval_covariates", {})
 
     baseline = WeibullBaseline(alpha=baseline_cfg["alpha"], rho=baseline_cfg["rho"])
     step_params = StepwiseBetaParams(
@@ -193,6 +225,9 @@ def build_generator(cfg: Dict) -> ExtendedAFTStepGenerator:
         epsilon=grid_cfg["epsilon"],
         t_max=grid_cfg["t_max"],
     )
+    interval_covariates = IntervalCovariatesParams(
+        noise_scale=interval_cfg.get("noise_scale", 0.0)
+    )
 
     return ExtendedAFTStepGenerator(
         n=cfg["n"],
@@ -201,6 +236,7 @@ def build_generator(cfg: Dict) -> ExtendedAFTStepGenerator:
         step_params=step_params,
         censoring=censoring,
         grid=grid,
+        interval_covariates=interval_covariates,
         seed=cfg.get("seed", 42),
     )
 
@@ -227,6 +263,9 @@ def main() -> None:
     generator = build_generator(cfg)
     df = generator.simulate()
     df.to_csv(args.output, index=False)
+    meta_path = f"{args.output}.meta.json"
+    with open(meta_path, "w", encoding="utf-8") as handle:
+        json.dump({"time_grid": generator.step_params.time_grid}, handle, indent=2)
     print(f"生成データを {args.output} に保存しました。")
 
 

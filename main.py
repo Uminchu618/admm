@@ -101,6 +101,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         else:
             print("WandB が利用できないためロギングをスキップします。")
 
+    # データを読み込み、fit を呼び出す（fit 本体は未実装のため例外はそのまま伝播する）。
+    data_path = args.data
+    data = pd.read_csv(data_path)
+    meta_path = Path(f"{data_path}.meta.json")
+    if meta_path.exists():
+        with meta_path.open("r", encoding="utf-8") as handle:
+            meta = json.load(handle)
+        if "time_grid" in meta:
+            config["time_grid"] = meta["time_grid"]
+
     # 実行パラメータを表示してから実行する。
     print("\n=== Run parameters ===")
     print(
@@ -116,22 +126,49 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # 設定辞書から推定器を構築する。
     # 余計なキーや型不一致があれば TypeError が発生し得る。
     model = ADMMHazardAFT.from_config(config)
-
-    # データを読み込み、fit を呼び出す（fit 本体は未実装のため例外はそのまま伝播する）。
-    data_path = args.data
-    data = pd.read_csv(data_path)
-    required_cols = {"time", "event"}
+    required_cols = {"id", "k", "time", "event"}
     if not required_cols.issubset(data.columns):
         missing = sorted(required_cols - set(data.columns))
-        raise ValueError(f"Missing required columns in {data_path}: {missing}")
+        raise ValueError(
+            f"Missing required columns in {data_path} (long format): {missing}"
+        )
 
     feature_cols = [
         col
         for col in data.columns
-        if col not in {"time", "event", "time_true", "c1", "c2"}
+        if col
+        not in {
+            "id",
+            "k",
+            "time",
+            "event",
+            "time_true",
+            "c1",
+            "c2",
+        }
     ]
-    X = data[feature_cols].to_numpy()
-    y = data[["time", "event"]].to_numpy()
+    data_sorted = data.sort_values(["id", "k"]).reset_index(drop=True)
+    k_values = data_sorted["k"].to_numpy()
+    if k_values.size == 0:
+        raise ValueError(f"Empty dataset: {data_path}")
+    if k_values.min() < 0:
+        raise ValueError("k must be non-negative in long format")
+    k_count = int(k_values.max()) + 1
+    group_sizes = data_sorted.groupby("id", sort=True)["k"].size().to_numpy()
+    if not np.all(group_sizes == k_count):
+        raise ValueError("Each id must have exactly K rows in long format")
+
+    expected_k = np.tile(np.arange(k_count), group_sizes.size)
+    if not np.array_equal(k_values, expected_k):
+        raise ValueError("k must be 0..K-1 in order for each id")
+
+    X = (
+        data_sorted[feature_cols]
+        .to_numpy()
+        .reshape(group_sizes.size, k_count, len(feature_cols))
+    )
+    y_rows = data_sorted.iloc[::k_count]
+    y = y_rows[["time", "event"]].to_numpy()
     model.fit(X, y)
 
     # 推定された β を見やすく表示する。
@@ -147,6 +184,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(model.gamma_)
     print("\n=== ADMM history (last) ===")
     last_obj = model.history_["objective"][-1] if model.history_["objective"] else None
+    last_neg_loglik = (
+        model.history_["neg_loglik"][-1] if model.history_["neg_loglik"] else None
+    )
     last_pr = (
         model.history_["primal_residual"][-1]
         if model.history_["primal_residual"]
@@ -155,7 +195,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     last_dr = (
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
-    print({"objective": last_obj, "primal_residual": last_pr, "dual_residual": last_dr})
+    print(
+        {
+            "objective": last_obj,
+            "neg_loglik": last_neg_loglik,
+            "primal_residual": last_pr,
+            "dual_residual": last_dr,
+        }
+    )
     print("\n=== ADMM last z (z_) ===")
     print(model.z_)
 
@@ -186,7 +233,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         result = {
             "data_path": str(data_path),
             "n_samples": int(X.shape[0]),
-            "n_features": int(X.shape[1]),
+            "n_features": int(X.shape[2]),
             "feature_cols": feature_cols,
             "time_grid": list(map(float, time_grid)),
             "coef": coef.tolist(),
@@ -195,6 +242,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "history": model.history_,
             "summary": {
                 "objective_last": last_obj,
+                "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
             },
@@ -210,6 +258,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         wandb_logger.log_metrics(
             {
                 "objective_last": last_obj,
+                "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
                 "z_last": model.z_.tolist(),

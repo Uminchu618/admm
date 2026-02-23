@@ -11,13 +11,30 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
 
-def collect_results(base_dir: Path) -> List[Dict[str, Any]]:
+def count_nonzero_z(z_last: Any, tol: float) -> Optional[int]:
+    """z_lastのうち|z|>tolの要素数を数える"""
+    if z_last is None:
+        return None
+
+    try:
+        total = 0
+        for row in z_last:
+            for value in row:
+                if abs(float(value)) > tol:
+                    total += 1
+        return total
+    except (TypeError, ValueError):
+        return None
+
+
+def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
     """結果JSONをすべて収集する
 
     Args:
@@ -41,20 +58,42 @@ def collect_results(base_dir: Path) -> List[Dict[str, Any]]:
             # lambda値を抽出（lambda_0.01 → 0.01）
             lambda_str = lambda_dir.replace("lambda_", "")
 
+            z_last = result.get("z_last")
+
             row = {
                 "data_name": data_dir,
                 "lambda_fuse": float(lambda_str),
                 "n_samples": result.get("n_samples"),
                 "n_features": result.get("n_features"),
                 "objective_last": result.get("summary", {}).get("objective_last"),
+                "neg_loglik_last": result.get("summary", {}).get("neg_loglik_last"),
                 "primal_residual_last": result.get("summary", {}).get(
                     "primal_residual_last"
                 ),
                 "dual_residual_last": result.get("summary", {}).get(
                     "dual_residual_last"
                 ),
+                "n_params": count_nonzero_z(z_last, z_tol),
                 "result_path": str(result_path.relative_to(base_dir.parent.parent)),
             }
+
+            loglik = row["neg_loglik_last"]
+            if loglik is not None:
+                loglik = -float(loglik)
+
+            if loglik is None and row["objective_last"] is not None:
+                loglik = -float(row["objective_last"])
+
+            if (
+                loglik is not None
+                and row["n_params"] is not None
+                and row["n_samples"] is not None
+            ):
+                row["bic"] = -2.0 * loglik + float(row["n_params"]) * math.log(
+                    float(row["n_samples"])
+                )
+            else:
+                row["bic"] = None
 
             # configから主要なハイパーパラメータも記録
             config = result.get("config", {})
@@ -91,6 +130,12 @@ def main() -> None:
         default="objective_last",
         help="ソートに使う列名（デフォルト: objective_last）",
     )
+    parser.add_argument(
+        "--z-tol",
+        type=float,
+        default=1e-8,
+        help="|z|>tol を非ゼロとみなす閾値",
+    )
 
     args = parser.parse_args()
 
@@ -99,7 +144,7 @@ def main() -> None:
         return
 
     print(f"Collecting results from: {args.base_dir}")
-    results = collect_results(args.base_dir)
+    results = collect_results(args.base_dir, args.z_tol)
 
     if not results:
         print("No results found.")
@@ -124,9 +169,15 @@ def main() -> None:
     # 上位5件を表示
     print("\n=== Top 5 results (by objective) ===")
     print(
-        df[["data_name", "lambda_fuse", "objective_last", "primal_residual_last"]].head(
-            5
-        )
+        df[
+            [
+                "data_name",
+                "lambda_fuse",
+                "objective_last",
+                "primal_residual_last",
+                "n_params",
+            ]
+        ].head(5)
     )
 
 
