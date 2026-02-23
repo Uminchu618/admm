@@ -184,6 +184,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(model.gamma_)
     print("\n=== ADMM history (last) ===")
     last_obj = model.history_["objective"][-1] if model.history_["objective"] else None
+    last_neg_loglik = (
+        model.history_["neg_loglik"][-1] if model.history_["neg_loglik"] else None
+    )
     last_pr = (
         model.history_["primal_residual"][-1]
         if model.history_["primal_residual"]
@@ -192,7 +195,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     last_dr = (
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
-    print({"objective": last_obj, "primal_residual": last_pr, "dual_residual": last_dr})
+    print(
+        {
+            "objective": last_obj,
+            "neg_loglik": last_neg_loglik,
+            "primal_residual": last_pr,
+            "dual_residual": last_dr,
+        }
+    )
     print("\n=== ADMM last z (z_) ===")
     print(model.z_)
 
@@ -232,6 +242,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "history": model.history_,
             "summary": {
                 "objective_last": last_obj,
+                "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
             },
@@ -247,6 +258,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         wandb_logger.log_metrics(
             {
                 "objective_last": last_obj,
+                "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
                 "z_last": model.z_.tolist(),

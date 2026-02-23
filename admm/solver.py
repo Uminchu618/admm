@@ -209,6 +209,8 @@ class FusedLassoADMMSolver:
         history: Dict[str, Any] = {
             # 目的関数値（最小化対象）：-log\tilde{L} + fused lasso ペナルティ
             "objective": [],
+            # ペナルティなしの -log\tilde{L}
+            "neg_loglik": [],
             # primal residual: ||Dβ - z||
             "primal_residual": [],
             # dual residual: ||ρ D^T (z^k - z^{k-1})||
@@ -486,6 +488,7 @@ class FusedLassoADMMSolver:
             penalty = float(self.lambda_fuse * np.sum(np.abs(d_beta)))
             total_objective = base_value + penalty
             history["objective"].append(total_objective)
+            history["neg_loglik"].append(base_value)
             history["primal_residual"].append(primal_residual)
             history["dual_residual"].append(dual_residual)
             history["rho"].append(float(self.rho))
