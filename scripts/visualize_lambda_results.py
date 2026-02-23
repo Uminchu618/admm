@@ -58,6 +58,55 @@ def plot_lambda_vs_objective(df: pd.DataFrame, output_dir: Path) -> None:
     plt.close(fig)
 
 
+def plot_lambda_vs_bic(df: pd.DataFrame, output_dir: Path) -> None:
+    """Lambda値とBICの関係をプロット
+
+    Args:
+        df: 集計結果のDataFrame
+        output_dir: プロット保存先ディレクトリ
+    """
+    if "bic" not in df.columns:
+        print("Warning: 'bic' column not found. Skipping lambda_vs_bic plot.")
+        return
+
+    df_valid = df.dropna(subset=["bic"])
+    if df_valid.empty:
+        print("Warning: No valid BIC values found. Skipping lambda_vs_bic plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    lambdas = np.sort(df_valid["lambda_fuse"].unique())
+    bic_by_lambda = [
+        df_valid.loc[df_valid["lambda_fuse"] == val, "bic"].to_numpy()
+        for val in lambdas
+    ]
+    widths = lambdas * 0.12
+
+    ax.boxplot(
+        bic_by_lambda,
+        positions=lambdas,
+        widths=widths,
+        showfliers=False,
+        patch_artist=True,
+        boxprops={"facecolor": "#9ecae1", "alpha": 0.7},
+        medianprops={"color": "#08306b", "linewidth": 1.2},
+    )
+
+    ax.set_xscale("log")
+    ax.set_xlabel("lambda_fuse (log scale)")
+    ax.set_ylabel("BIC")
+    ax.set_title("BIC distribution by lambda")
+    ax.set_xticks(lambdas)
+    ax.grid(True, axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    output_path = output_dir / "lambda_vs_bic.png"
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved plot to: {output_path}")
+    plt.close(fig)
+
+
 def load_beta_results(
     results_dir: Path,
 ) -> Tuple[Dict[float, List[np.ndarray]], np.ndarray]:
@@ -305,6 +354,7 @@ def main() -> None:
 
     print("\nGenerating plots...")
     plot_lambda_vs_objective(df, args.output_dir)
+    plot_lambda_vs_bic(df, args.output_dir)
     plot_lambda_distribution(args.output_dir, args.results_dir, args.generator_config)
     plot_convergence_vs_lambda(df, args.output_dir)
 
