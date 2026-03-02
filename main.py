@@ -31,6 +31,24 @@ from admm.logger import WandBLogger, wandb_available
 from admm.model import ADMMHazardAFT
 
 
+def _parse_predict_times(raw: Optional[str]) -> Optional[list[float]]:
+    """カンマ区切り文字列を予測時刻リストへ変換する。"""
+    if raw is None:
+        return None
+    text = raw.strip()
+    if text == "":
+        return None
+    try:
+        times = [float(token.strip()) for token in text.split(",") if token.strip()]
+    except ValueError as exc:
+        raise ValueError(
+            "--predict-times はカンマ区切りの数値で指定してください。"
+        ) from exc
+    if len(times) == 0:
+        return None
+    return times
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """コマンドライン引数を解釈し、推定器を初期化する。
 
@@ -81,6 +99,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         action="store_true",
         help="Save beta step plot (requires matplotlib).",
     )
+    parser.add_argument(
+        "--load-result",
+        type=Path,
+        default=None,
+        help="Path to existing result.json. If set, skip fit and run prediction only.",
+    )
+    parser.add_argument(
+        "--predict-times",
+        type=str,
+        default=None,
+        help="Comma-separated prediction times (e.g. 1.0,2.0,3.5).",
+    )
 
     # 引数を解析する。argv が None なら OS のコマンドライン引数を使う。
     args = parser.parse_args(argv)
@@ -118,14 +148,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "config_path": str(args.config),
             "data_path": str(args.data),
             "output_path": str(args.output) if args.output is not None else None,
+            "load_result": (
+                str(args.load_result) if args.load_result is not None else None
+            ),
+            "predict_times": args.predict_times,
             "plot": bool(args.plot),
             "config": config,
         }
     )
 
-    # 設定辞書から推定器を構築する。
-    # 余計なキーや型不一致があれば TypeError が発生し得る。
-    model = ADMMHazardAFT.from_config(config)
     required_cols = {"id", "k", "time", "event"}
     if not required_cols.issubset(data.columns):
         missing = sorted(required_cols - set(data.columns))
@@ -169,6 +200,77 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     y_rows = data_sorted.iloc[::k_count]
     y = y_rows[["time", "event"]].to_numpy()
+
+    prediction_times = _parse_predict_times(args.predict_times)
+
+    if args.load_result is not None:
+        # result.json に config が含まれる場合は優先してモデルを再構築する。
+        with args.load_result.open("r", encoding="utf-8") as handle:
+            loaded_result = json.load(handle)
+        model_config = dict(config)
+        if isinstance(loaded_result.get("config"), dict):
+            model_config.update(loaded_result["config"])
+        if "time_grid" in loaded_result:
+            model_config["time_grid"] = loaded_result["time_grid"]
+
+        model = ADMMHazardAFT.from_config(model_config)
+        model.load_params_from_result_json(args.load_result)
+
+        survival = model.predict_survival_function(X, times=prediction_times)
+        cumulative = model.predict_cumulative_hazard(X, times=prediction_times)
+        times_out = (
+            np.asarray(prediction_times, dtype=float)
+            if prediction_times is not None
+            else np.asarray(model.time_grid_[1:], dtype=float)
+        )
+
+        print("\n=== Predict-only mode ===")
+        print(
+            {
+                "n_samples": int(X.shape[0]),
+                "n_features": int(X.shape[2]),
+                "n_times": int(times_out.size),
+                "times": times_out.tolist(),
+            }
+        )
+        preview_n = min(3, survival.shape[0])
+        print("\n=== Survival preview (first rows) ===")
+        print(survival[:preview_n])
+
+        if args.output is not None:
+            output_path = args.output
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            result = {
+                "mode": "predict_only",
+                "data_path": str(data_path),
+                "loaded_result_path": str(args.load_result),
+                "n_samples": int(X.shape[0]),
+                "n_features": int(X.shape[2]),
+                "feature_cols": feature_cols,
+                "time_grid": list(map(float, model.time_grid_)),
+                "predict_times": times_out.tolist(),
+                "survival": survival.tolist(),
+                "cumulative_hazard": cumulative.tolist(),
+            }
+            with output_path.open("w", encoding="utf-8") as handle:
+                json.dump(result, handle, ensure_ascii=False, indent=2)
+            print(f"Saved prediction JSON to {output_path}")
+
+        if wandb_logger is not None:
+            wandb_logger.log_metrics(
+                {
+                    "n_samples": int(X.shape[0]),
+                    "n_features": int(X.shape[2]),
+                    "n_times": int(times_out.size),
+                },
+                prefix="predict_only",
+            )
+            wandb_logger.finish()
+        return
+
+    # 設定辞書から推定器を構築する。
+    # 余計なキーや型不一致があれば TypeError が発生し得る。
+    model = ADMMHazardAFT.from_config(config)
     model.fit(X, y)
 
     # 推定された β を見やすく表示する。
