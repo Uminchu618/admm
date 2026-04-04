@@ -90,6 +90,8 @@ uv run scripts/visualize_lambda_results.py --summary outputs/lambda_summary.csv 
 - `lambda_distribution.png`: Lambda値ごとの目的関数分布（箱ひげ図）
 - `lambda_vs_convergence.png`: Lambda値と収束状況（primal/dual residual）
 
+集計CSVには `c_td`（time-dependent C-index 相当）も含まれます。
+
 ### ローカルでのテスト実行
 
 ```bash
@@ -183,10 +185,29 @@ uv run main.py --config config.toml --data data/simulated_data.csv
 - 結果集計・可視化スクリプト
 
 🚧 今後の実装：
-- 生存関数・累積ハザードの予測API
-- 評価指標（C-index, Brier scoreなど）
+- Brier score など追加の評価指標
 - 適応的ρ調整
 - M/I-splineベースライン（積分の解析的計算）
+
+## Ctd評価（time-dependent C-index）
+
+本実装では、以下の定義に基づく `c_td` を評価指標として計算します。
+
+$$
+C^{td}
+=
+\Pr\!\left(
+S(T_i \mid X_i(t)) < S(T_i \mid X_j(t))
+\;\middle|\;
+T_i < T_j,\; D_i = 1
+\right)
+$$
+
+- 比較対象ペア: $T_i < T_j,\; D_i=1$
+- 判定: $S(T_i \mid X_i(t)) < S(T_i \mid X_j(t))$
+- 同値（tie）: 0.5 点
+
+`main.py --output` の `result.json` では、`summary.c_td` として出力されます。
 
 ## 参考文献
 

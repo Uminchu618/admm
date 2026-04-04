@@ -1,4 +1,4 @@
-$C^{td}$は、C-indexに相当する時間効果変動する生存時間モデルの性能評価指標である。
+$C^{td}$は、C-indexに相当する時間効果変動生存時間モデルの性能評価指標である。
 
 ## Notation
 
@@ -11,7 +11,7 @@ $C^{td}$は、C-indexに相当する時間効果変動する生存時間モデ�
 - $\phi_{\mathrm{comp}}$: comparable pair の確率
 - $\phi^{td}_{\mathrm{conc}}$: time-dependent concordant pair の確率
 
-## Final formulals
+## Final formula
 
 $$
 C^{td}
@@ -50,3 +50,12 @@ T_i < T_j,
 D_i = 1
 \right)
 $$
+
+## Implementation policy in this repository
+
+- Metric key: `c_td`
+- Comparable pairs: $(T_i < T_j,\; D_i = 1)$
+- Concordant condition: $S(T_i \mid X_i(t)) < S(T_i \mid X_j(t))$
+- Tie handling: 0.5 point
+- If no comparable pair exists: return `NaN`
+

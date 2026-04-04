@@ -73,6 +73,7 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
                 "dual_residual_last": result.get("summary", {}).get(
                     "dual_residual_last"
                 ),
+                "c_td": result.get("summary", {}).get("c_td"),
                 "n_params": count_nonzero_z(z_last, z_tol),
                 "result_path": str(result_path.relative_to(base_dir.parent.parent)),
             }

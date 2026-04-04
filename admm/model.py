@@ -10,6 +10,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 from .baseline import BaselineHazardModel, BSplineBaseline
+from .evaluator import HazardAFTEvaluator
 from .objective import HazardAFTObjective
 from .quadrature import QuadratureRule
 from .solver import FusedLassoADMMSolver
@@ -319,17 +320,18 @@ class ADMMHazardAFT:
         raise NotImplementedError("predict_risk_score is not implemented yet.")
 
     def score(self, X: ArrayLike, y: ArrayLike) -> float:
-        """モデルのスコアを返す（未実装）。
+        """モデルのスコア（C^{td}）を返す。
 
-        sklearn 互換の流儀では、高いほど良いスコアを返す。
-        本プロジェクトでは近似対数尤度 log\tilde{L} を返す（あるいは -loss）ことが自然。
+        C^{td} は高いほど予測順位が良いことを意味する。
 
         Raises:
             RuntimeError: fit 前に呼ばれた場合。
-            NotImplementedError: 現時点では未実装。
+            ValueError: y の形式や X/y のサンプル数が不正な場合。
         """
         self._check_is_fitted()
-        raise NotImplementedError("score is not implemented yet.")
+        evaluator = HazardAFTEvaluator()
+        metrics = evaluator.evaluate(self, X, y)
+        return float(metrics["c_td"])
 
     def _validate_inputs(
         self, X: ArrayLike, y: ArrayLike

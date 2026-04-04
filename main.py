@@ -218,6 +218,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
         survival = model.predict_survival_function(X, times=prediction_times)
         cumulative = model.predict_cumulative_hazard(X, times=prediction_times)
+        c_td = model.score(X, y)
         times_out = (
             np.asarray(prediction_times, dtype=float)
             if prediction_times is not None
@@ -231,6 +232,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "n_features": int(X.shape[2]),
                 "n_times": int(times_out.size),
                 "times": times_out.tolist(),
+                "c_td": c_td,
             }
         )
         preview_n = min(3, survival.shape[0])
@@ -249,6 +251,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "feature_cols": feature_cols,
                 "time_grid": list(map(float, model.time_grid_)),
                 "predict_times": times_out.tolist(),
+                "summary": {"c_td": c_td},
                 "survival": survival.tolist(),
                 "cumulative_hazard": cumulative.tolist(),
             }
@@ -262,6 +265,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     "n_samples": int(X.shape[0]),
                     "n_features": int(X.shape[2]),
                     "n_times": int(times_out.size),
+                    "c_td": c_td,
                 },
                 prefix="predict_only",
             )
@@ -272,6 +276,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # 余計なキーや型不一致があれば TypeError が発生し得る。
     model = ADMMHazardAFT.from_config(config)
     model.fit(X, y)
+    c_td = model.score(X, y)
 
     # 推定された β を見やすく表示する。
     coef = model.coef_
@@ -303,6 +308,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "neg_loglik": last_neg_loglik,
             "primal_residual": last_pr,
             "dual_residual": last_dr,
+            "c_td": c_td,
         }
     )
     print("\n=== ADMM last z (z_) ===")
@@ -347,6 +353,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "c_td": c_td,
             },
             "config": config,
         }
@@ -363,6 +370,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "c_td": c_td,
                 "z_last": model.z_.tolist(),
             },
             prefix="summary",
