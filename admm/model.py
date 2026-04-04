@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
@@ -175,7 +177,7 @@ class ADMMHazardAFT:
     def predict_survival_function(
         self, X: ArrayLike, times: Optional[Sequence[float]] = None
     ) -> ArrayLike:
-        """生存関数 S(t|X) を返す（未実装）。
+        """生存関数 S(t|X) を返す。
 
         Args:
             X: 特徴量。
@@ -183,22 +185,124 @@ class ADMMHazardAFT:
 
         Raises:
             RuntimeError: fit 前に呼ばれた場合（_check_is_fitted）。
-            NotImplementedError: 現時点では未実装。
         """
         self._check_is_fitted()
-        raise NotImplementedError("predict_survival_function is not implemented yet.")
+
+        cumulative_hazard = self.predict_cumulative_hazard(X, times=times)
+        return np.exp(-cumulative_hazard)
 
     def predict_cumulative_hazard(
         self, X: ArrayLike, times: Optional[Sequence[float]] = None
     ) -> ArrayLike:
-        """累積ハザード Λ(t|X) を返す（未実装）。
+        """累積ハザード Λ(t|X) を返す。
 
         Raises:
             RuntimeError: fit 前に呼ばれた場合。
-            NotImplementedError: 現時点では未実装。
         """
         self._check_is_fitted()
-        raise NotImplementedError("predict_cumulative_hazard is not implemented yet.")
+
+        X_arr = self._prepare_predict_X(X)
+        times_arr = self._prepare_predict_times(times)
+
+        beta = np.asarray(self.coef_, dtype=float)
+        gamma = np.asarray(self.gamma_, dtype=float).reshape(-1)
+        eta = np.asarray(self.time_partition_.eta(beta, X_arr), dtype=float)
+        eta = np.clip(eta, -float(self.clip_eta), float(self.clip_eta))
+        exp_eta = np.exp(eta)
+
+        time_grid = np.asarray(self.time_grid_, dtype=float)
+        n_samples = X_arr.shape[0]
+        n_times = times_arr.size
+        cumulative_hazard = np.zeros((n_samples, n_times), dtype=float)
+
+        for t_idx, t in enumerate(times_arr):
+            # 1-based index: t_{k-1} <= t < t_k（t=t_K は K に丸め）
+            k_t = int(
+                self.time_partition_.interval_index(np.array([t], dtype=float))[0]
+            )
+
+            for k0 in range(k_t):
+                a = float(time_grid[k0])
+                b = float(min(float(t), time_grid[k0 + 1]))
+                if b <= a:
+                    continue
+
+                v, w = self.quadrature_.nodes_weights(a, b)
+                v_arr = np.asarray(v, dtype=float)
+                w_arr = np.asarray(w, dtype=float)
+                if w_arr.size == 0:
+                    continue
+
+                for i in range(n_samples):
+                    x = exp_eta[i, k0] * v_arr
+                    S = np.asarray(self.baseline_.basis(x), dtype=float)
+                    h = eta[i, k0] + (S @ gamma)
+                    h = np.clip(h, -float(self.clip_eta), float(self.clip_eta))
+                    cumulative_hazard[i, t_idx] += float(np.sum(w_arr * np.exp(h)))
+
+        return cumulative_hazard
+
+    def load_params_from_result_json(self, result_path: str | Path) -> "ADMMHazardAFT":
+        """result.json から係数（beta/gamma）を読み込み、学習済み属性を復元する。
+
+        Args:
+            result_path: main.py が出力した result.json のパス。
+
+        Returns:
+            self（メソッドチェーン可能）。
+        """
+        path = Path(result_path)
+        with path.open("r", encoding="utf-8") as handle:
+            result = json.load(handle)
+
+        if "coef" not in result or "gamma" not in result:
+            raise ValueError("result.json に coef または gamma が含まれていません。")
+
+        coef = np.asarray(result["coef"], dtype=float)
+        gamma = np.asarray(result["gamma"], dtype=float).reshape(-1)
+
+        if coef.ndim != 2:
+            raise ValueError("result['coef'] は 2 次元配列である必要があります。")
+        if gamma.ndim != 1:
+            raise ValueError("result['gamma'] は 1 次元配列である必要があります。")
+
+        if "time_grid" in result:
+            loaded_time_grid = tuple(float(t) for t in result["time_grid"])
+            if len(loaded_time_grid) != coef.shape[0] + 1:
+                raise ValueError(
+                    "result['time_grid'] の長さが coef と整合しません（K+1 が必要）。"
+                )
+            self.time_grid_ = loaded_time_grid
+        else:
+            self.time_grid_ = tuple(float(t) for t in self.time_grid)
+            if len(self.time_grid_) != coef.shape[0] + 1:
+                raise ValueError(
+                    "time_grid の長さが読み込んだ coef と整合しません（K+1 が必要）。"
+                )
+
+        self.coef_ = coef
+        self.gamma_ = gamma
+        self.n_features_in_ = int(coef.shape[1])
+        if "history" in result and isinstance(result["history"], dict):
+            self.history_ = dict(result["history"])
+
+        # 予測 API が動くよう、fit 後に作られる依存コンポーネントを再構築する。
+        T_ref = np.array([float(self.time_grid_[-1])], dtype=float)
+        components = self._build_components(T_ref)
+        self.baseline_ = components.baseline
+        self.time_partition_ = components.time_partition
+        self.quadrature_ = components.quadrature
+        self.objective_ = components.objective
+
+        # ADMM 補助変数は result にあれば復元、なければ空で初期化。
+        if "z_last" in result:
+            self.z_ = np.asarray(result["z_last"], dtype=float)
+        else:
+            self.z_ = np.zeros((coef.shape[1], max(coef.shape[0] - 1, 0)), dtype=float)
+
+        self.u_ = np.zeros_like(self.z_)
+        self.rho_ = float(self.rho)
+        return self
 
     def predict_risk_score(
         self, X: ArrayLike, time: Optional[float] = None
@@ -454,3 +558,51 @@ class ADMMHazardAFT:
         if not hasattr(self, "coef_"):
             # predict/score を fit 前に呼んだ、などの利用ミスを明確にする。
             raise RuntimeError("This ADMMHazardAFT instance is not fitted yet.")
+
+    def _prepare_predict_X(self, X: ArrayLike) -> np.ndarray:
+        """予測入力 X を (n, K, p) へ正規化する。"""
+        X_arr = np.asarray(X, dtype=float)
+        if np.any(~np.isfinite(X_arr)):
+            raise ValueError("X に無限大または NaN が含まれています。")
+
+        K = int(self.coef_.shape[0])
+        p = int(self.coef_.shape[1])
+
+        if X_arr.ndim == 2:
+            if X_arr.shape[1] != p:
+                raise ValueError("X の特徴量数が coef_ と整合しません。")
+            X_arr = np.repeat(X_arr[:, None, :], K, axis=1)
+            return X_arr
+
+        if X_arr.ndim == 3:
+            if X_arr.shape[1] != K:
+                raise ValueError("X の K 次元が coef_ と整合しません。")
+            if X_arr.shape[2] != p:
+                raise ValueError("X の特徴量数が coef_ と整合しません。")
+            return X_arr
+
+        raise ValueError(
+            "X は 2 次元 (n,p) または 3 次元 (n,K,p) 配列である必要があります。"
+        )
+
+    def _prepare_predict_times(self, times: Optional[Sequence[float]]) -> np.ndarray:
+        """予測時刻を 1 次元配列へ正規化・検証する。"""
+        if times is None:
+            times_arr = np.asarray(self.time_grid_[1:], dtype=float)
+        else:
+            times_arr = np.asarray(times, dtype=float).reshape(-1)
+
+        if times_arr.ndim != 1:
+            raise ValueError("times は 1 次元配列である必要があります。")
+        if times_arr.size == 0:
+            raise ValueError("times は 1 点以上必要です。")
+        if np.any(~np.isfinite(times_arr)):
+            raise ValueError("times に無限大または NaN が含まれています。")
+
+        t_min = float(self.time_grid_[0])
+        t_max = float(self.time_grid_[-1])
+        if np.any(times_arr < t_min) or np.any(times_arr > t_max):
+            raise ValueError(
+                f"times は [{t_min}, {t_max}] の範囲に収まる必要があります。"
+            )
+        return times_arr
