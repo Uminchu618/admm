@@ -123,14 +123,7 @@ class ExtendedAFTStepGenerator:
         base = np.stack([x1, x2, x3], axis=1)
         base = base[:, None, :]
         base = np.repeat(base, k, axis=1)
-
-        noise_scale = float(self.interval_covariates.noise_scale)
-        if noise_scale <= 0.0:
-            return base
-
-        rng = np.random.default_rng(self.seed + 10)
-        noise = rng.normal(0.0, noise_scale, size=base.shape)
-        return base + noise
+        return base
 
     def _hazard(self, t: np.ndarray, x1: float, g2: float, g3: float) -> np.ndarray:
         eta = self._beta1(t) * x1 + self._beta2(t) * g2 + self._beta3(t) * g3

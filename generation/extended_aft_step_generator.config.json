@@ -53,6 +53,6 @@
         "t_max": 8.0
     },
     "interval_covariates": {
-        "noise_scale": 0.1
+        "noise_scale": 0.0
     }
 }

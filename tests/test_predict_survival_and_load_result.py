@@ -59,6 +59,14 @@ def test_predict_survival_and_load_result_json(tmp_path: Path) -> None:
 
     survival = model.predict_survival_function(X_static, times=times)
     cumulative = model.predict_cumulative_hazard(X_static, times=times)
+    y_eval = np.array(
+        [
+            [0.5, 1],
+            [2.5, 0],
+        ],
+        dtype=float,
+    )
+    c_td = model.score(X_static, y_eval)
 
     assert survival.shape == (2, 3)
     assert cumulative.shape == (2, 3)
@@ -71,3 +79,5 @@ def test_predict_survival_and_load_result_json(tmp_path: Path) -> None:
 
     # S(t) = exp(-Lambda(t)) の一致性を確認する。
     assert np.allclose(survival, np.exp(-cumulative), atol=1e-12, rtol=1e-10)
+    assert np.isfinite(c_td)
+    assert 0.0 <= c_td <= 1.0

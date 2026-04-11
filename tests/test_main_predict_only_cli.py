@@ -52,6 +52,8 @@ def test_main_predict_only_cli(tmp_path: Path) -> None:
 
     assert payload["mode"] == "predict_only"
     assert payload["predict_times"] == [1.0, 2.0, 3.0]
+    assert "summary" in payload
+    assert "c_td" in payload["summary"]
     assert "survival" in payload
     assert "cumulative_hazard" in payload
     assert len(payload["survival"]) > 0

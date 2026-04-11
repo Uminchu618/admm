@@ -6,8 +6,9 @@
 
 # 公開 API は model.py で定義している。
 from .model import ADMMHazardAFT
+from .evaluator import HazardAFTEvaluator
 
 # __all__:
 # - `from admm import *` の対象を明示する。
 # - 公開対象を絞り、内部コンポーネント（objective/solver など）を隠蔽する目的。
-__all__ = ["ADMMHazardAFT"]
+__all__ = ["ADMMHazardAFT", "HazardAFTEvaluator"]
