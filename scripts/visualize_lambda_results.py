@@ -78,7 +78,9 @@ def plot_lambda_vs_bic(df: pd.DataFrame, output_dir: Path) -> None:
 
     lambdas = np.sort(df_valid["lambda_fuse"].unique())
     bic_by_lambda = [
-        df_valid.loc[df_valid["lambda_fuse"] == val, "bic"].to_numpy()
+        df_valid.loc[df_valid["lambda_fuse"] == val, ["bic"]]
+        .to_numpy(dtype=float)
+        .ravel()
         for val in lambdas
     ]
     widths = lambdas * 0.12
@@ -102,6 +104,57 @@ def plot_lambda_vs_bic(df: pd.DataFrame, output_dir: Path) -> None:
 
     fig.tight_layout()
     output_path = output_dir / "lambda_vs_bic.png"
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved plot to: {output_path}")
+    plt.close(fig)
+
+
+def plot_lambda_vs_c_td(df: pd.DataFrame, output_dir: Path) -> None:
+    """Lambda値とc_tdの関係を箱ひげ図でプロット
+
+    Args:
+        df: 集計結果のDataFrame
+        output_dir: プロット保存先ディレクトリ
+    """
+    if "c_td" not in df.columns:
+        print("Warning: 'c_td' column not found. Skipping lambda_vs_c_td plot.")
+        return
+
+    df_valid = df.dropna(subset=["c_td"])
+    if df_valid.empty:
+        print("Warning: No valid c_td values found. Skipping lambda_vs_c_td plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    lambdas = np.sort(df_valid["lambda_fuse"].unique())
+    ctd_by_lambda = [
+        df_valid.loc[df_valid["lambda_fuse"] == val, ["c_td"]]
+        .to_numpy(dtype=float)
+        .ravel()
+        for val in lambdas
+    ]
+    widths = lambdas * 0.12
+
+    ax.boxplot(
+        ctd_by_lambda,
+        positions=lambdas,
+        widths=widths,
+        showfliers=False,
+        patch_artist=True,
+        boxprops={"facecolor": "#fdae6b", "alpha": 0.75},
+        medianprops={"color": "#7f2704", "linewidth": 1.2},
+    )
+
+    ax.set_xscale("log")
+    ax.set_xlabel("lambda_fuse (log scale)")
+    ax.set_ylabel("c_td")
+    ax.set_title("c_td distribution by lambda")
+    ax.set_xticks(lambdas)
+    ax.grid(True, axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    output_path = output_dir / "lambda_vs_c_td.png"
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"Saved plot to: {output_path}")
     plt.close(fig)
@@ -355,6 +408,7 @@ def main() -> None:
     print("\nGenerating plots...")
     plot_lambda_vs_objective(df, args.output_dir)
     plot_lambda_vs_bic(df, args.output_dir)
+    plot_lambda_vs_c_td(df, args.output_dir)
     plot_lambda_distribution(args.output_dir, args.results_dir, args.generator_config)
     plot_convergence_vs_lambda(df, args.output_dir)
 
