@@ -78,7 +78,9 @@ def plot_lambda_vs_bic(df: pd.DataFrame, output_dir: Path) -> None:
 
     lambdas = np.sort(df_valid["lambda_fuse"].unique())
     bic_by_lambda = [
-        df_valid.loc[df_valid["lambda_fuse"] == val, "bic"].to_numpy()
+        df_valid.loc[df_valid["lambda_fuse"] == val, ["bic"]]
+        .to_numpy(dtype=float)
+        .ravel()
         for val in lambdas
     ]
     widths = lambdas * 0.12
@@ -102,6 +104,154 @@ def plot_lambda_vs_bic(df: pd.DataFrame, output_dir: Path) -> None:
 
     fig.tight_layout()
     output_path = output_dir / "lambda_vs_bic.png"
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved plot to: {output_path}")
+    plt.close(fig)
+
+
+def plot_lambda_vs_c_td(df: pd.DataFrame, output_dir: Path) -> None:
+    """Lambda値とc_tdの関係を箱ひげ図でプロット
+
+    Args:
+        df: 集計結果のDataFrame
+        output_dir: プロット保存先ディレクトリ
+    """
+    if "c_td" not in df.columns:
+        print("Warning: 'c_td' column not found. Skipping lambda_vs_c_td plot.")
+        return
+
+    df_valid = df.dropna(subset=["c_td"])
+    if df_valid.empty:
+        print("Warning: No valid c_td values found. Skipping lambda_vs_c_td plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    lambdas = np.sort(df_valid["lambda_fuse"].unique())
+    ctd_by_lambda = [
+        df_valid.loc[df_valid["lambda_fuse"] == val, ["c_td"]]
+        .to_numpy(dtype=float)
+        .ravel()
+        for val in lambdas
+    ]
+    widths = lambdas * 0.12
+
+    ax.boxplot(
+        ctd_by_lambda,
+        positions=lambdas,
+        widths=widths,
+        showfliers=False,
+        patch_artist=True,
+        boxprops={"facecolor": "#fdae6b", "alpha": 0.75},
+        medianprops={"color": "#7f2704", "linewidth": 1.2},
+    )
+
+    ax.set_xscale("log")
+    ax.set_xlabel("lambda_fuse (log scale)")
+    ax.set_ylabel("c_td")
+    ax.set_title("c_td distribution by lambda")
+    ax.set_xticks(lambdas)
+    ax.grid(True, axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    output_path = output_dir / "lambda_vs_c_td.png"
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved plot to: {output_path}")
+    plt.close(fig)
+
+
+def plot_lambda_vs_c_td_with_cox(
+    df: pd.DataFrame,
+    output_dir: Path,
+    cox_df: pd.DataFrame,
+) -> None:
+    """Lambda値とc_tdの分布にCox基準線を重ねてプロットする。
+
+    Args:
+        df: ADMMの集計結果DataFrame（c_td, lambda_fuseを含む）
+        output_dir: プロット保存先ディレクトリ
+        cox_df: Cox評価の集計DataFrame（c_td_coxを含む）
+    """
+    if "c_td" not in df.columns:
+        print("Warning: 'c_td' column not found. Skipping Cox comparison plot.")
+        return
+    if "c_td_cox" not in cox_df.columns:
+        print(
+            "Warning: 'c_td_cox' column not found in Cox summary. "
+            "Skipping Cox comparison plot."
+        )
+        return
+
+    df_valid = df.dropna(subset=["c_td"])
+    cox_valid = cox_df.dropna(subset=["c_td_cox"])
+    if df_valid.empty or cox_valid.empty:
+        print("Warning: No valid c_td values found. Skipping Cox comparison plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    lambdas = np.sort(df_valid["lambda_fuse"].unique())
+    ctd_by_lambda = [
+        df_valid.loc[df_valid["lambda_fuse"] == val, ["c_td"]]
+        .to_numpy(dtype=float)
+        .ravel()
+        for val in lambdas
+    ]
+    widths = lambdas * 0.12
+
+    ax.boxplot(
+        ctd_by_lambda,
+        positions=lambdas,
+        widths=widths,
+        showfliers=False,
+        patch_artist=True,
+        boxprops={"facecolor": "#fdae6b", "alpha": 0.75},
+        medianprops={"color": "#7f2704", "linewidth": 1.2},
+    )
+
+    cox_values = cox_valid["c_td_cox"].to_numpy(dtype=float)
+    cox_mean = float(np.mean(cox_values))
+    cox_q1 = float(np.quantile(cox_values, 0.25))
+    cox_q3 = float(np.quantile(cox_values, 0.75))
+
+    x_min = float(np.min(lambdas))
+    x_max = float(np.max(lambdas))
+    ax.fill_between(
+        [x_min, x_max],
+        [cox_q1, cox_q1],
+        [cox_q3, cox_q3],
+        color="#9ecae1",
+        alpha=0.35,
+        label=f"Cox c_td IQR [{cox_q1:.3f}, {cox_q3:.3f}]",
+    )
+    ax.axhline(
+        cox_mean,
+        color="#08519c",
+        linestyle="--",
+        linewidth=1.6,
+        label=f"Cox c_td mean = {cox_mean:.3f}",
+    )
+
+    if "c_index_harrell" in cox_valid.columns:
+        c_harrell = float(np.mean(cox_valid["c_index_harrell"].to_numpy(dtype=float)))
+        ax.axhline(
+            c_harrell,
+            color="#238b45",
+            linestyle=":",
+            linewidth=1.6,
+            label=f"Cox Harrell mean = {c_harrell:.3f}",
+        )
+
+    ax.set_xscale("log")
+    ax.set_xlabel("lambda_fuse (log scale)")
+    ax.set_ylabel("c_td")
+    ax.set_title("c_td by lambda with Cox baseline")
+    ax.set_xticks(lambdas)
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.legend(loc="best")
+
+    fig.tight_layout()
+    output_path = output_dir / "lambda_vs_c_td_with_cox.png"
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"Saved plot to: {output_path}")
     plt.close(fig)
@@ -340,6 +490,12 @@ def main() -> None:
         default=Path("generation/extended_aft_step_generator.config.json"),
         help="真値β(t)計算用の生成設定",
     )
+    parser.add_argument(
+        "--cox-summary",
+        type=Path,
+        default=None,
+        help="Optional CSV path with Cox metrics (must include c_td_cox).",
+    )
 
     args = parser.parse_args()
 
@@ -355,6 +511,13 @@ def main() -> None:
     print("\nGenerating plots...")
     plot_lambda_vs_objective(df, args.output_dir)
     plot_lambda_vs_bic(df, args.output_dir)
+    plot_lambda_vs_c_td(df, args.output_dir)
+    if args.cox_summary is not None:
+        if args.cox_summary.exists():
+            cox_df = pd.read_csv(args.cox_summary)
+            plot_lambda_vs_c_td_with_cox(df, args.output_dir, cox_df)
+        else:
+            print(f"Warning: Cox summary file not found: {args.cox_summary}")
     plot_lambda_distribution(args.output_dir, args.results_dir, args.generator_config)
     plot_convergence_vs_lambda(df, args.output_dir)
 
