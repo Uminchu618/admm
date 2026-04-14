@@ -130,12 +130,14 @@ class ExtendedAFTStepGenerator:
         scale_t = np.exp(eta) * t
         return np.exp(eta) * self.baseline.hazard(scale_t)
 
-    def _simulate_event_time(self, x1: float, g2: float, g3: float) -> float:
+    def _simulate_event_time(
+        self, x1: float, g2: float, g3: float, rng: np.random.Generator
+    ) -> float:
         t_grid = np.arange(0.0, self.grid.t_max + self.grid.dt, self.grid.dt)
         hazard_vals = self._hazard(t_grid[:-1], x1, g2, g3)
         cum_hazard = np.cumsum(hazard_vals) * self.grid.dt
         surv = np.exp(-cum_hazard)
-        u = np.random.default_rng().uniform(0.0, 1.0)
+        u = rng.uniform(0.0, 1.0)
         diff = np.abs(surv - u)
         idx = np.where(diff < self.grid.epsilon)[0]
         if idx.size > 0:
@@ -148,10 +150,11 @@ class ExtendedAFTStepGenerator:
         x1, x2, x3 = self.generate_covariates()
         g2 = self._g2(x2)
         g3 = self._g3(x3)
+        event_rng = np.random.default_rng(self.seed + 2)
 
         t_true = np.zeros(self.n, dtype=float)
         for i in range(self.n):
-            t_true[i] = self._simulate_event_time(x1[i], g2[i], g3[i])
+            t_true[i] = self._simulate_event_time(x1[i], g2[i], g3[i], event_rng)
 
         rng = np.random.default_rng(self.seed + 1)
         c1 = np.full(self.n, self.censoring.admin_time)
