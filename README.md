@@ -85,10 +85,35 @@ uv run scripts/aggregate_lambda_results.py --base-dir outputs/lambda_experiments
 uv run scripts/visualize_lambda_results.py --summary outputs/lambda_summary.csv --output-dir outputs/lambda_plots
 ```
 
+#### 5. Cox回帰との C-index 比較
+
+まず Cox 回帰を各データで学習し、`c_td` と Harrell C-index を計算します。
+
+```bash
+uv run scripts/compute_cox_metrics.py \
+  --data-dir data/extended_aft_step \
+  --output outputs/cox_summary.csv \
+  --lambda-summary outputs/lambda_summary.csv \
+  --compare-output outputs/cox_vs_lambda_c_td.csv
+```
+
+次に、既存の `lambda_vs_c_td.png` に加えて、Cox 基準線付きの比較図を生成します。
+
+```bash
+uv run scripts/visualize_lambda_results.py \
+  --summary outputs/lambda_summary.csv \
+  --output-dir outputs/lambda_plots \
+  --cox-summary outputs/cox_summary.csv
+```
+
+追加で生成されるファイル：
+- `lambda_vs_c_td_with_cox.png`: ADMM の lambda ごとの c_td 分布に Cox の c_td 基準線（平均/IQR）を重ねた図
+
 生成されるプロット：
 - `lambda_vs_objective.png`: Lambda値と目的関数の関係
 - `lambda_distribution.png`: Lambda値ごとの目的関数分布（箱ひげ図）
 - `lambda_vs_convergence.png`: Lambda値と収束状況（primal/dual residual）
+- `lambda_vs_c_td_with_cox.png`: Cox の c_td 基準線付き比較図（`--cox-summary` 指定時）
 
 集計CSVには `c_td`（time-dependent C-index 相当）も含まれます。
 
@@ -119,6 +144,7 @@ uv run scripts/visualize_lambda_results.py --summary outputs/lambda_summary.csv 
 │   └── logger.py         # WandBロガー
 ├── scripts/              # ユーティリティスクリプト
 │   ├── aggregate_lambda_results.py  # 結果集計
+│   ├── compute_cox_metrics.py       # Cox回帰の指標計算
 │   └── visualize_lambda_results.py  # 結果可視化
 ├── data/
 │   └── extended_aft/     # データセット（CSV）

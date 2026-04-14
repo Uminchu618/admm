@@ -1,0 +1,2 @@
+data_name,data_path,n_samples,n_features,n_events,c_td_cox,c_index_harrell
+extended_aft_step_seed_42,data/extended_aft_step/extended_aft_step_seed_42.csv,1000,3,843,0.7025206427526133,0.7025206427526133
