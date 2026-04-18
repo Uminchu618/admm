@@ -19,8 +19,14 @@ def generate_datasets(
     seed_end: int,
     prefix: str,
     overwrite: bool,
+    baseline_alpha: float | None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if baseline_alpha is not None:
+        cfg.setdefault("baseline", {})
+        cfg["baseline"]["alpha"] = float(baseline_alpha)
+        print(f"override baseline.alpha = {cfg['baseline']['alpha']}")
 
     for seed in range(seed_start, seed_end + 1):
         cfg_seed = copy.deepcopy(cfg)
@@ -82,6 +88,12 @@ def main() -> None:
         action="store_true",
         help="既存ファイルを上書きする",
     )
+    parser.add_argument(
+        "--baseline-alpha",
+        type=float,
+        default=None,
+        help="baseline.alpha を上書きする値（未指定なら設定ファイル値）",
+    )
 
     args = parser.parse_args()
 
@@ -93,6 +105,7 @@ def main() -> None:
         seed_end=args.seed_end,
         prefix=args.prefix,
         overwrite=args.overwrite,
+        baseline_alpha=args.baseline_alpha,
     )
 
 

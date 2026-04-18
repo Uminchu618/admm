@@ -1,2 +1,0 @@
-data_name,data_path,n_samples,n_features,n_events,c_td_cox,c_index_harrell,admm_best_c_td,admm_median_c_td,admm_mean_c_td,delta_best_admm_minus_cox,delta_median_admm_minus_cox
-extended_aft_step_seed_42,data/extended_aft_step/extended_aft_step_seed_42.csv,1000,3,843,0.7025206427526133,0.7025206427526133,0.7105478667616277,0.7093779568446914,0.7091263667988423,0.008027224009014455,0.006857314092078126
