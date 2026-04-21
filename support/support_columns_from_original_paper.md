@@ -1,6 +1,6 @@
-# SUPPORT CSV 列定義メモ
+# SUPPORT2 CSV 列定義メモ
 
-対象ファイル: `support.csv`  
+対象ファイル: `support2.csv`  
 主な典拠: SUPPORT 原著論文  
 **A Controlled Trial to Improve Care for Seriously Ill Hospitalized Patients: The Study to Understand Prognoses and Preferences for Outcomes and Risks of Treatments (SUPPORT), JAMA, 1995**
 
@@ -15,6 +15,8 @@
 
 を突き合わせて整理したものです。  
 **論文中で厳密な変数名定義が確認できない列については、その旨を明記**しています。
+
+以下は `support2.csv` の列定義メモです。
 
 ---
 
@@ -46,6 +48,28 @@
 | `edu` | 教育年数 | 論文 Table 2 では high school 以上かを報告。CSV では年数で入っている。 |
 | `income` | 年収カテゴリ | 例: `under $11k`, `$11-$25k`, `$25-$50k`, `>$50k`。論文 Table 2 の annual income に対応。 |
 | `race` | 人種・民族カテゴリ | 例: `white`, `black`, `hispanic`, `asian`, `other`。 |
+
+### 重症度・予後関連列
+
+| 列名 | 意味 | 備考 |
+|---|---|---|
+| `sps` | SUPPORT physiological score、またはそれに準ずる生理学的重症度スコア | 値域から、複数の生理指標を要約した連続スコアとみるのが自然。**原著本文だけでは略語の厳密展開は確認しきれない。** |
+| `aps` | APACHE 系の acute physiology score | SUPPORT 論文でも APACHE III/APS が重症度評価に使われている。整数値。 |
+| `surv2m` | 2か月生存確率の予測値 | 0〜1 の連続値。SUPPORT の予後予測モデルに整合的。 |
+| `surv6m` | 6か月生存確率の予測値 | 0〜1 の連続値。2か月版と対になる予測値。 |
+| `prg2m` | 2か月時点の機能予後・予後良好確率の予測値 | 0〜1 の連続値。`surv2m` とは別に、機能状態や予後区分の推定値を持っている可能性が高い。**厳密定義は補助資料が必要。** |
+| `prg6m` | 6か月時点の機能予後・予後良好確率の予測値 | 0〜1 の連続値。`prg2m` の6か月版とみられる。 |
+
+### 既往・臨床経過列
+
+| 列名 | 意味 | 備考 |
+|---|---|---|
+| `hday` | 入院後何日目の評価/登録かを表す病日 | 値の取り方から hospital day と解釈するのが自然。 |
+| `diabetes` | 糖尿病の有無 | 0/1。併存疾患フラグ。 |
+| `dementia` | 認知症の有無 | 0/1。併存疾患フラグ。 |
+| `ca` | がんの状態 | `no`, `yes`, `metastatic` など。単なる有無ではなく進行度を含むカテゴリ。 |
+| `dnr` | DNR（Do Not Resuscitate）指示の状態 | `no dnr`, `dnr before sadm`, `dnr after sadm` などのカテゴリ。`sadm` は study admission とみられる。 |
+| `dnrday` | DNR 指示が出た病日 | 数値列。DNR がない場合は `NA` のことがある。 |
 
 ### 重症度・生理学的指標
 
@@ -80,8 +104,8 @@
 
 | 列名 | 意味 | 備考 |
 |---|---|---|
-| `adlp` | 患者報告の ADL 障害スコア | `p` は patient と解釈するのが自然。0–7 の整数。 |
-| `adls` | 代諾者/家族等（surrogate）報告の ADL 障害スコア | `s` は surrogate と解釈するのが自然。0–7 の整数。 |
+| `adlp` | 患者報告の ADL 障害スコア | `p` は patient と解釈するのが自然。0-7 の整数。 |
+| `adls` | 代諾者/家族等（surrogate）報告の ADL 障害スコア | `s` は surrogate と解釈するのが自然。0-7 の整数。 |
 | `adlsc` | 統合 ADL スコア / 補完後 ADL スコア | 患者または surrogate 情報を統合した連続値とみられる。論文では「患者面接不能なら surrogate 回答で代用」とある。 |
 | `sfdm2` | 2か月時点機能状態に関する分類または欠測理由コード | 値に `SIP>=30`, `Coma or Intub`, `<2 mo. follow-up` などがある。**2か月後機能予後に関連する派生変数**とみるのが妥当。原著本文では phase II 介入で「2か月時点の機能障害予測」を扱っているが、この列の厳密なコード表は本文だけでは出ていない。 |
 
@@ -98,9 +122,14 @@
 - `dzgroup`
 - `dzclass`
 - `num.co`
+- `diabetes`
+- `dementia`
+- `ca`
 
 ### 2. 重症度・生理学
 - `scoma`
+- `sps`
+- `aps`
 - `meanbp`
 - `wblc`
 - `hrt`
@@ -118,15 +147,22 @@
 
 ### 3. 資源利用
 - `slos`
+- `hday`
 - `avtisst`
 - `charges`
 - `totcst`
 - `totmcst`
 
-### 4. 生存・死亡
+### 4. 生存・死亡・予後
 - `death`
 - `hospdead`
 - `d.time`
+- `surv2m`
+- `surv6m`
+- `prg2m`
+- `prg6m`
+- `dnr`
+- `dnrday`
 
 ### 5. 機能状態
 - `adlp`
@@ -143,14 +179,20 @@
    - `death` は**追跡期間中に死亡したか**  
    生存解析では `death` と `d.time` を組で使うのが基本です。
 
-2. `charges` と `totcst` は同じではない  
+2. `surv2m` / `surv6m` と `prg2m` / `prg6m` は別系列の予測値  
+   前者は生存確率、後者は機能予後や広義の prognosis を表す派生予測値である可能性が高く、同一視しない方が安全です。
+
+3. `charges` と `totcst` は同じではない  
    論文でも **charges（請求額）** と **resource use / cost** は区別されています。
 
-3. `adlp`, `adls`, `adlsc` はそのまま混ぜない  
+4. `adlp`, `adls`, `adlsc` はそのまま混ぜない  
    患者自己申告、代理回答、補完後スコアが混在している可能性があります。
 
-4. `sfdm2`, `totmcst`, `scoma` は原著論文だけでは厳密定義が落ちない  
+5. `sfdm2`, `totmcst`, `scoma`, `sps`, `prg2m`, `prg6m` は原著論文だけでは厳密定義が落ちない  
    ここは SUPPORT 関連の補助論文やデータ辞書がないと完全確定できません。
+
+6. `dnr` と `dnrday` は重要だが、時点の解釈に注意  
+   `dnr before sadm` / `dnr after sadm` のような値があり、単純な 0/1 ではなく「いつ DNR が成立したか」を含むカテゴリ列です。
 
 ---
 
@@ -169,6 +211,18 @@ num.co   : 併存疾患数
 edu      : 教育年数
 income   : 年収カテゴリ
 scoma    : 昏睡/意識レベル関連スコア
+sps      : 生理学的重症度要約スコア
+aps      : APACHE系 acute physiology score
+surv2m   : 2か月生存確率予測値
+surv6m   : 6か月生存確率予測値
+hday     : 病日 / hospital day
+diabetes : 糖尿病フラグ
+dementia : 認知症フラグ
+ca       : がん状態カテゴリ
+prg2m    : 2か月予後予測値
+prg6m    : 6か月予後予測値
+dnr      : DNR状態
+dnrday   : DNR決定病日
 charges  : 病院請求額
 totcst   : 総コスト
 totmcst  : コスト別集計（厳密定義は要補足資料）
@@ -201,4 +255,3 @@ adlsc    : 統合/補完後ADLスコア
 - SUPPORT 原著論文では、対象患者、疾患群、死亡、DNR、ICU日数、人工呼吸、痛み、TISS を用いた resource use、APACHE III/APS、ADL、2か月後機能障害予測などが説明されている。
 - ただし **CSV の短縮変数名そのものの完全なコードブックは原著論文本文には載っていない**。  
   したがって、この Markdown は**原著ベースで確実に言える部分**と、**変数名から合理的に復元した部分**を分けて記述した。
-

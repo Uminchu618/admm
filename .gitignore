@@ -16,3 +16,4 @@ wheels/
 /.env
 
 /outputs/lambda_experiments
+.DS_Store

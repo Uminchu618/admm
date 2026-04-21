@@ -11,7 +11,7 @@ options(timeout = max(60L, getOption("timeout", 60L)))
 
 tryCatch(
 	{
-		Hmisc::getHdata("support")
+		Hmisc::getHdata("support2")
 	},
 	error = function(e) {
 		message("Hmisc::getHdata('support') に失敗しました: ", conditionMessage(e))
@@ -28,6 +28,6 @@ script_dir <- if (length(script_file) >= 1) {
 	getwd()
 }
 
-out_csv <- file.path(script_dir, "support.csv")
-utils::write.csv(support, file = out_csv, row.names = FALSE, fileEncoding = "UTF-8")
+out_csv <- file.path(script_dir, "support2.csv")
+utils::write.csv(support2, file = out_csv, row.names = FALSE, fileEncoding = "UTF-8")
 message("Wrote: ", out_csv)
