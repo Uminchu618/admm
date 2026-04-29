@@ -13,7 +13,10 @@ wheels/
 /*.png
 
 /wandb
-/.env
+# 環境変数ファイル（全階層）
+.env
+.env.local
+.env.*.local
 
 /outputs/lambda_experiments
 .DS_Store
