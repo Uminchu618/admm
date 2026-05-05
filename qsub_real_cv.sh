@@ -6,7 +6,8 @@
 #$ -j y
 #$ -N real_cv
 
-#### Real-data CV: lambda 10 点 × 5-fold = 50 task
+#### Real-data CV: lambda_grid.json の lambda 10 点 × 5-fold = 50 task
+#### lambda_grid.json の点数や N_FOLDS を変える場合は #$ -t も合わせて変更する。
 #### Framingham は qsub -v DATASET=framingham qsub_real_cv.sh のように投げる。
 #$ -t 1-50:1
 #$ -tc 50
