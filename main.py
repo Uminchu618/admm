@@ -354,12 +354,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     last_dr = (
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
+    stopping_reason = model.history_.get("stopping_reason")
+    n_admm_iter = model.history_.get("n_admm_iter", len(model.history_["objective"]))
     print(
         {
             "objective": last_obj,
             "neg_loglik": last_neg_loglik,
             "primal_residual": last_pr,
             "dual_residual": last_dr,
+            "stopping_reason": stopping_reason,
+            "n_admm_iter": n_admm_iter,
             "c_td": c_td,
             "c_td_train": c_td_train,
             "c_td_test": c_td_eval,
@@ -411,6 +415,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "stopping_reason": stopping_reason,
+                "n_admm_iter": n_admm_iter,
                 "c_td": c_td,
                 "c_td_train": c_td_train,
                 "c_td_test": c_td_eval,
@@ -430,6 +436,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "stopping_reason": stopping_reason,
+                "n_admm_iter": n_admm_iter,
                 "c_td": c_td,
                 "c_td_train": c_td_train,
                 "c_td_test": c_td_eval,

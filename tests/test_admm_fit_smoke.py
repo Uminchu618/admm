@@ -59,6 +59,14 @@ def main() -> None:
         raise AssertionError("history_ missing best_objective")
     if "used_best_iterate" not in fitted.history_:
         raise AssertionError("history_ missing used_best_iterate")
+    if "stopping_reason" not in fitted.history_:
+        raise AssertionError("history_ missing stopping_reason")
+    if "n_admm_iter" not in fitted.history_:
+        raise AssertionError("history_ missing n_admm_iter")
+    if "primal_tolerance" not in fitted.history_:
+        raise AssertionError("history_ missing primal_tolerance")
+    if "dual_tolerance" not in fitted.history_:
+        raise AssertionError("history_ missing dual_tolerance")
     if fitted.history_["best_objective"] is None:
         raise AssertionError("best_objective should not be None in smoke test")
 

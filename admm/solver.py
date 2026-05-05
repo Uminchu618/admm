@@ -34,6 +34,7 @@ class FusedLassoADMMSolver:
         max_admm_iter: int,
         admm_tol_primal: float,
         admm_tol_dual: float,
+        admm_tol_rel: float,
         newton_steps_per_admm: int,
         max_newton_iter: int,
         newton_tol: float,
@@ -58,6 +59,7 @@ class FusedLassoADMMSolver:
         # admm_tol_primal/admm_tol_dual: primal/dual residual の収束閾値。
         self.admm_tol_primal = admm_tol_primal
         self.admm_tol_dual = admm_tol_dual
+        self.admm_tol_rel = admm_tol_rel
 
         # newton_steps_per_admm: ADMM 1反復あたりの Newton ステップ数（inexact Newton の制御）。
         self.newton_steps_per_admm = newton_steps_per_admm
@@ -148,6 +150,12 @@ class FusedLassoADMMSolver:
             raise ValueError("line_search_shrink は (0,1) の範囲である必要があります。")
         if not (0.0 < float(self.line_search_c1) < 1.0):
             raise ValueError("line_search_c1 は (0,1) の範囲である必要があります。")
+        if float(self.admm_tol_primal) < 0.0:
+            raise ValueError("admm_tol_primal は 0 以上である必要があります。")
+        if float(self.admm_tol_dual) < 0.0:
+            raise ValueError("admm_tol_dual は 0 以上である必要があります。")
+        if float(self.admm_tol_rel) < 0.0:
+            raise ValueError("admm_tol_rel は 0 以上である必要があります。")
 
         def diff_beta(beta_matrix: np.ndarray) -> np.ndarray:
             if diff_len == 0 or n_penalized == 0:
@@ -217,6 +225,9 @@ class FusedLassoADMMSolver:
             "dual_residual": [],
             # ADMM ペナルティ係数 ρ（適応化する場合は更新後の値）
             "rho": [],
+            # Boyd 型の停止判定で使う許容誤差（絶対 + 相対）
+            "primal_tolerance": [],
+            "dual_tolerance": [],
             # ADMM 1反復あたりの Newton ステップ数
             "newton_steps": [],
             # β 更新量のノルム（damped Newton のステップ長を含む）
@@ -235,6 +246,7 @@ class FusedLassoADMMSolver:
         best_u = u.copy()
         best_iter = -1
         stopped_due_to_invalid = False
+        stopping_reason = "max_iter"
 
         newton_steps = max(1, int(self.newton_steps_per_admm))
         newton_steps = min(newton_steps, max(1, int(self.max_newton_iter)))
@@ -242,6 +254,9 @@ class FusedLassoADMMSolver:
         ls_max_steps = int(self.line_search_max_steps)
         ls_shrink = float(self.line_search_shrink)
         ls_c1 = float(self.line_search_c1)
+        tol_abs_primal = float(self.admm_tol_primal)
+        tol_abs_dual = float(self.admm_tol_dual)
+        tol_rel = float(self.admm_tol_rel)
 
         for admm_iter in tqdm(
             range(int(self.max_admm_iter)),
@@ -479,9 +494,20 @@ class FusedLassoADMMSolver:
                 primal_residual = float(np.linalg.norm(d_beta - z))
                 dual_step = d_transpose(z - z_prev)
                 dual_residual = float(self.rho * np.linalg.norm(dual_step))
+                primal_scale = max(
+                    float(np.linalg.norm(d_beta)),
+                    float(np.linalg.norm(z)),
+                )
+                dual_scale = float(self.rho * np.linalg.norm(d_transpose(u)))
+                primal_tolerance = np.sqrt(float(z.size)) * tol_abs_primal
+                primal_tolerance += tol_rel * primal_scale
+                dual_tolerance = np.sqrt(float(beta.size)) * tol_abs_dual
+                dual_tolerance += tol_rel * dual_scale
             else:
                 primal_residual = 0.0
                 dual_residual = 0.0
+                primal_tolerance = 0.0
+                dual_tolerance = 0.0
 
             # 履歴を記録（目的関数は最小化対象として扱う）
             base_value = safe_base_value(beta, gamma)
@@ -492,6 +518,8 @@ class FusedLassoADMMSolver:
             history["primal_residual"].append(primal_residual)
             history["dual_residual"].append(dual_residual)
             history["rho"].append(float(self.rho))
+            history["primal_tolerance"].append(float(primal_tolerance))
+            history["dual_tolerance"].append(float(dual_tolerance))
             history["newton_steps"].append(int(newton_steps))
             history["beta_step_norm"].append(beta_step_norm)
             history["gamma_step_norm"].append(gamma_step_norm)
@@ -505,9 +533,10 @@ class FusedLassoADMMSolver:
                 best_iter = int(admm_iter)
 
             if (
-                primal_residual <= self.admm_tol_primal
-                and dual_residual <= self.admm_tol_dual
+                primal_residual <= primal_tolerance
+                and dual_residual <= dual_tolerance
             ):
+                stopping_reason = "residual_converged"
                 break
 
         if bool(self.return_best_iterate) and np.isfinite(best_objective):
@@ -529,5 +558,9 @@ class FusedLassoADMMSolver:
         history["best_iter"] = int(best_iter) if best_iter >= 0 else None
         history["used_best_iterate"] = used_best_iterate
         history["stopped_due_to_invalid"] = bool(stopped_due_to_invalid)
+        if stopped_due_to_invalid:
+            stopping_reason = "invalid_state"
+        history["stopping_reason"] = stopping_reason
+        history["n_admm_iter"] = int(len(history["objective"]))
 
         return beta_out, gamma_out, z_out, u_out, history
