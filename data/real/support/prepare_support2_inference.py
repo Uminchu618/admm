@@ -28,52 +28,82 @@ import numpy as np
 import pandas as pd
 
 
-# `main.py` は `id`, `k`, `time`, `event` 以外の列をすべて特徴量として扱う。
-# そのため、ここで出力する特徴量は数値列だけになるように決めておく。
-#
-# SUPPORT2 には疾患分類や人種などのカテゴリ列もあるが、このスクリプトでは
-# Framingham と同じ「まずは確実に動く最小構成」を優先し、欠損が少なく、
-# 数値化の解釈が比較的明確なベースライン情報だけを使う。
-DEFAULT_FEATURE_COLS = [
+# 解析で使う元の SUPPORT2 共変量。
+RAW_FEATURE_COLS = [
     "age",
-    # `sex` は文字列なので、そのままではモデルに渡せない。
-    # male=1, female=0 のダミー変数を後で作成する。
-    "sex_male",
+    "sex",
+    "race",
     "num.co",
     "diabetes",
     "dementia",
+    "ca",
     "meanbp",
     "hrt",
     "resp",
     "temp",
-    "sps",
-    "aps",
-    "surv2m",
-    "surv6m",
-    "crea",
+    "wblc",
     "sod",
+    "crea",
+]
+
+# `main.py` は `id`, `k`, `time`, `event` 以外の列をすべて特徴量として扱う。
+# そのため、カテゴリ列はここで基準カテゴリを落とした one-hot に変換する。
+CATEGORICAL_LEVELS = {
+    "sex": ["female", "male"],
+    "race": ["white", "black", "hispanic", "asian", "other"],
+    "ca": ["no", "yes", "metastatic"],
+}
+
+CATEGORICAL_FEATURE_COLS = [
+    f"{col}_{level}"
+    for col, levels in CATEGORICAL_LEVELS.items()
+    for level in levels[1:]
+]
+
+CONTINUOUS_FEATURE_COLS = [
+    "age",
+    "num.co",
+    "meanbp",
+    "hrt",
+    "resp",
+    "temp",
+    "wblc",
+    "sod",
+    "crea",
+]
+
+BINARY_FEATURE_COLS = [
+    "diabetes",
+    "dementia",
+]
+
+DEFAULT_FEATURE_COLS = [
+    "age",
+    "sex_male",
+    "race_black",
+    "race_hispanic",
+    "race_asian",
+    "race_other",
+    "num.co",
+    "diabetes",
+    "dementia",
+    "ca_yes",
+    "ca_metastatic",
+    "meanbp",
+    "hrt",
+    "resp",
+    "temp",
+    "wblc",
+    "sod",
+    "crea",
 ]
 
 # 標準化する連続特徴量。
 #
-# 0/1 のダミー・フラグである `sex_male`, `diabetes`, `dementia` は、
-# 値の意味を保つため標準化しない。
-# 一方で、年齢・血圧・心拍数・スコア類はスケールが大きく異なるため、
+# 0/1 のダミー・フラグは、値の意味を保つため標準化しない。
+# 一方で、年齢・バイタル・検査値などはスケールが大きく異なるため、
 # Newton 更新や ADMM の数値安定性を考えて標準化する。
-DEFAULT_STANDARDIZE_COLS = [
-    "age",
-    "num.co",
-    "meanbp",
-    "hrt",
-    "resp",
-    "temp",
-    "sps",
-    "aps",
-    "surv2m",
-    "surv6m",
-    "crea",
-    "sod",
-]
+DEFAULT_STANDARDIZE_COLS = CONTINUOUS_FEATURE_COLS
 
 
 def _load_time_grid(config_path: Path) -> np.ndarray:
@@ -137,24 +167,41 @@ def prepare_support2(
     source = source.reset_index(names="source_row")
     source["id"] = source["source_row"].astype(int) + 1
 
-    # 文字列カテゴリ `sex` を数値特徴量へ変換する。
-    # female は 0 として表現され、基準カテゴリの役割になる。
-    source["sex_male"] = (source["sex"] == "male").astype(int)
-
     # `d.time`: 登録から死亡または打ち切りまでの日数
     # `death`: 追跡期間中に死亡したかどうか
     # この 2 列を ADMMHazardAFT の y=(time,event) に対応させる。
-    required_cols = ["id", "d.time", "death", *DEFAULT_FEATURE_COLS]
-    base = source.loc[:, required_cols].copy()
+    required_source_cols = ["id", "d.time", "death", *RAW_FEATURE_COLS]
+    base = source.loc[:, required_source_cols].copy()
 
-    # モデル入力はすべて数値である必要がある。
+    # 数値として扱う列はここで変換する。
     # 変換できない値が混ざっていれば NaN にして、後続の dropna で除外する。
-    for col in required_cols:
+    numeric_cols = [
+        "id",
+        "d.time",
+        "death",
+        *CONTINUOUS_FEATURE_COLS,
+        *BINARY_FEATURE_COLS,
+    ]
+    for col in numeric_cols:
         base[col] = pd.to_numeric(base[col], errors="coerce")
 
+    # カテゴリ列は表記ゆれを避けるため小文字・前後空白除去に寄せる。
+    for col, levels in CATEGORICAL_LEVELS.items():
+        base[col] = base[col].astype("string").str.strip().str.lower()
+        observed = set(base[col].dropna().unique())
+        unexpected = sorted(observed - set(levels))
+        if unexpected:
+            raise ValueError(f"Unexpected categories in {col}: {unexpected}")
+
     # 欠損を含む症例は、今回は単純に除外する。
-    # SUPPORT2 は欠損列が多いので、特徴量セットは欠損が少ない列を中心にしている。
-    base = base.dropna(subset=required_cols).reset_index(drop=True)
+    base = base.dropna(subset=required_source_cols).reset_index(drop=True)
+
+    # `sex`, `race`, `ca` を基準カテゴリつき one-hot へ変換する。
+    # 基準カテゴリはそれぞれ female, white, no。
+    for col, levels in CATEGORICAL_LEVELS.items():
+        for level in levels[1:]:
+            encoded_col = f"{col}_{level}"
+            base[encoded_col] = (base[col] == level).astype(int)
 
     # 0 日以下の生存時間は、このモデルの time_grid [t0, tK] 上で扱いづらい。
     # SUPPORT2 の `d.time` は今回のデータでは正の値だが、防御的に条件を入れておく。
@@ -236,7 +283,12 @@ def prepare_support2(
         "followup_max_original": max_followup,
         "time_min": float(long_df["time"].min()),
         "time_max": float(long_df["time"].max()),
+        "raw_feature_cols": RAW_FEATURE_COLS,
         "feature_cols": DEFAULT_FEATURE_COLS,
+        "categorical_feature_cols": CATEGORICAL_FEATURE_COLS,
+        "categorical_reference_levels": {
+            col: levels[0] for col, levels in CATEGORICAL_LEVELS.items()
+        },
         "standardize_cols": DEFAULT_STANDARDIZE_COLS,
         "standardization": standardization,
     }
