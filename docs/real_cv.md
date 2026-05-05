@@ -1,0 +1,59 @@
+# Real-data cross-validation
+
+実データの CV は qsub のアレイジョブで `lambda_fuse × fold` を並列実行する。
+Support2 と Framingham は同じ実行コードを使い、raw CSV から base データを作る部分だけ `scripts/real_cv/datasets.py` で分ける。
+
+## ディレクトリ
+
+```text
+scripts/real_cv/
+  datasets.py            # dataset 固有の raw -> base 変換
+  common.py              # fold 分割・標準化・long format 化
+  make_splits.py         # id 単位の fold 割当を作成
+  prepare_fold.py        # 1 fold の train/test CSV と config を作成
+  aggregate_results.py   # result.json を集計
+
+data/real/cv/splits/
+  support2/support2_5fold_seed1234.csv
+  framingham/framingham_5fold_seed1234.csv
+
+outputs/real_cv/
+  support2/support2_5fold_seed1234/lambda_1/fold_00/
+    config.json
+    fold_meta.json
+    data/train.csv
+    data/test.csv
+    result.json
+```
+
+## Support2
+
+```bash
+uv run scripts/real_cv/make_splits.py \
+  --dataset support2 \
+  --input data/real/support/support2.csv \
+  --output data/real/cv/splits/support2/support2_5fold_seed1234.csv \
+  --n-folds 5 \
+  --random-state 1234
+
+qsub qsub_real_cv.sh
+
+uv run scripts/real_cv/aggregate_results.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234
+```
+
+## Framingham
+
+```bash
+uv run scripts/real_cv/make_splits.py \
+  --dataset framingham \
+  --input data/real/framingham/framingham.csv \
+  --output data/real/cv/splits/framingham/framingham_5fold_seed1234.csv \
+  --n-folds 5 \
+  --random-state 1234
+
+qsub -v DATASET=framingham qsub_real_cv.sh
+
+uv run scripts/real_cv/aggregate_results.py \
+  --base-dir outputs/real_cv/framingham/framingham_5fold_seed1234
+```
