@@ -63,6 +63,13 @@ admm_tol_dual = 1e-4
 #   ||Dβ||, ||z||, ||ρD^T u|| の大きさに応じた Boyd 型の許容誤差も併用する。
 admm_tol_rel = 1e-3
 
+# admm_stagnation_tol / admm_stagnation_patience:
+#   β/γ 更新量が newton_tol 以下で、objective の相対変化もほぼ 0 の状態が続いた場合だけ停止する。
+#   さらに residual が通常の許容値の 10 倍以内まで近づいている場合に限るため、
+#   最適値から遠い一時的な停滞では止めない。
+admm_stagnation_tol = 1e-10
+admm_stagnation_patience = 10
+
 # newton_steps_per_admm:
 #   ADMM の (β,γ) 更新で行う Newton ステップ数（inexact Newton の制御）。
 #   1 にすると "毎回少しだけ Newton して次の ADMM 反復へ" という方針になる。

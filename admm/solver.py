@@ -35,6 +35,8 @@ class FusedLassoADMMSolver:
         admm_tol_primal: float,
         admm_tol_dual: float,
         admm_tol_rel: float,
+        admm_stagnation_tol: float,
+        admm_stagnation_patience: int,
         newton_steps_per_admm: int,
         max_newton_iter: int,
         newton_tol: float,
@@ -60,6 +62,8 @@ class FusedLassoADMMSolver:
         self.admm_tol_primal = admm_tol_primal
         self.admm_tol_dual = admm_tol_dual
         self.admm_tol_rel = admm_tol_rel
+        self.admm_stagnation_tol = admm_stagnation_tol
+        self.admm_stagnation_patience = admm_stagnation_patience
 
         # newton_steps_per_admm: ADMM 1反復あたりの Newton ステップ数（inexact Newton の制御）。
         self.newton_steps_per_admm = newton_steps_per_admm
@@ -156,6 +160,10 @@ class FusedLassoADMMSolver:
             raise ValueError("admm_tol_dual は 0 以上である必要があります。")
         if float(self.admm_tol_rel) < 0.0:
             raise ValueError("admm_tol_rel は 0 以上である必要があります。")
+        if float(self.admm_stagnation_tol) < 0.0:
+            raise ValueError("admm_stagnation_tol は 0 以上である必要があります。")
+        if int(self.admm_stagnation_patience) <= 0:
+            raise ValueError("admm_stagnation_patience は正の整数である必要があります。")
 
         def diff_beta(beta_matrix: np.ndarray) -> np.ndarray:
             if diff_len == 0 or n_penalized == 0:
@@ -228,6 +236,9 @@ class FusedLassoADMMSolver:
             # Boyd 型の停止判定で使う許容誤差（絶対 + 相対）
             "primal_tolerance": [],
             "dual_tolerance": [],
+            # 停滞判定用の objective 相対変化量と連続停滞回数
+            "objective_relative_change": [],
+            "stagnation_count": [],
             # ADMM 1反復あたりの Newton ステップ数
             "newton_steps": [],
             # β 更新量のノルム（damped Newton のステップ長を含む）
@@ -247,6 +258,8 @@ class FusedLassoADMMSolver:
         best_iter = -1
         stopped_due_to_invalid = False
         stopping_reason = "max_iter"
+        previous_objective: Optional[float] = None
+        stagnation_count = 0
 
         newton_steps = max(1, int(self.newton_steps_per_admm))
         newton_steps = min(newton_steps, max(1, int(self.max_newton_iter)))
@@ -257,6 +270,8 @@ class FusedLassoADMMSolver:
         tol_abs_primal = float(self.admm_tol_primal)
         tol_abs_dual = float(self.admm_tol_dual)
         tol_rel = float(self.admm_tol_rel)
+        stagnation_tol = float(self.admm_stagnation_tol)
+        stagnation_patience = int(self.admm_stagnation_patience)
 
         for admm_iter in tqdm(
             range(int(self.max_admm_iter)),
@@ -513,6 +528,17 @@ class FusedLassoADMMSolver:
             base_value = safe_base_value(beta, gamma)
             penalty = float(self.lambda_fuse * np.sum(np.abs(d_beta)))
             total_objective = base_value + penalty
+            if (
+                previous_objective is not None
+                and np.isfinite(previous_objective)
+                and np.isfinite(total_objective)
+            ):
+                objective_relative_change = abs(total_objective - previous_objective)
+                objective_relative_change /= max(1.0, abs(previous_objective))
+            else:
+                objective_relative_change = None
+            previous_objective = float(total_objective)
+
             history["objective"].append(total_objective)
             history["neg_loglik"].append(base_value)
             history["primal_residual"].append(primal_residual)
@@ -520,6 +546,7 @@ class FusedLassoADMMSolver:
             history["rho"].append(float(self.rho))
             history["primal_tolerance"].append(float(primal_tolerance))
             history["dual_tolerance"].append(float(dual_tolerance))
+            history["objective_relative_change"].append(objective_relative_change)
             history["newton_steps"].append(int(newton_steps))
             history["beta_step_norm"].append(beta_step_norm)
             history["gamma_step_norm"].append(gamma_step_norm)
@@ -532,11 +559,29 @@ class FusedLassoADMMSolver:
                 best_u = u.copy()
                 best_iter = int(admm_iter)
 
+            # 停滞停止は residual が収束許容値の近くまで来ている場合だけ使う。
+            # β/γ が一時的に動かないだけの反復を早止まりしないため。
+            if (
+                beta_step_norm <= self.newton_tol
+                and gamma_step_norm <= self.newton_tol
+                and objective_relative_change is not None
+                and objective_relative_change <= stagnation_tol
+                and primal_residual <= 10.0 * primal_tolerance
+                and dual_residual <= 10.0 * dual_tolerance
+            ):
+                stagnation_count += 1
+            else:
+                stagnation_count = 0
+            history["stagnation_count"].append(int(stagnation_count))
+
             if (
                 primal_residual <= primal_tolerance
                 and dual_residual <= dual_tolerance
             ):
                 stopping_reason = "residual_converged"
+                break
+            if stagnation_count >= stagnation_patience:
+                stopping_reason = "stagnated"
                 break
 
         if bool(self.return_best_iterate) and np.isfinite(best_objective):
