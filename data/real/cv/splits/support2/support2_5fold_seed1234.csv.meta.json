@@ -1,0 +1,37 @@
+{
+  "dataset": "support2",
+  "input_path": "data/real/support/support2.csv",
+  "output_path": "data/real/cv/splits/support2/support2_5fold_seed1234.csv",
+  "n_folds": 5,
+  "random_state": 1234,
+  "stratify_event": true,
+  "n_subjects": 8832,
+  "n_events": 6005,
+  "fold_counts": [
+    {
+      "fold": 0,
+      "n_subjects": 1767,
+      "n_events": 1201
+    },
+    {
+      "fold": 1,
+      "n_subjects": 1767,
+      "n_events": 1201
+    },
+    {
+      "fold": 2,
+      "n_subjects": 1766,
+      "n_events": 1201
+    },
+    {
+      "fold": 3,
+      "n_subjects": 1766,
+      "n_events": 1201
+    },
+    {
+      "fold": 4,
+      "n_subjects": 1766,
+      "n_events": 1201
+    }
+  ]
+}

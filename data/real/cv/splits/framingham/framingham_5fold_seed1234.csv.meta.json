@@ -1,0 +1,37 @@
+{
+  "dataset": "framingham",
+  "input_path": "data/real/framingham/framingham.csv",
+  "output_path": "data/real/cv/splits/framingham/framingham_5fold_seed1234.csv",
+  "n_folds": 5,
+  "random_state": 1234,
+  "stratify_event": true,
+  "n_subjects": 2996,
+  "n_events": 2181,
+  "fold_counts": [
+    {
+      "fold": 0,
+      "n_subjects": 600,
+      "n_events": 437
+    },
+    {
+      "fold": 1,
+      "n_subjects": 599,
+      "n_events": 436
+    },
+    {
+      "fold": 2,
+      "n_subjects": 599,
+      "n_events": 436
+    },
+    {
+      "fold": 3,
+      "n_subjects": 599,
+      "n_events": 436
+    },
+    {
+      "fold": 4,
+      "n_subjects": 599,
+      "n_events": 436
+    }
+  ]
+}
