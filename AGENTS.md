@@ -1,334 +1,309 @@
-日本語を用いること。
+常に日本語で答えてください。
 
-## 設計方針
+このリポジトリは、時間変動係数を持つ Hazard-AFT モデルを ADMM + fused lasso で推定し、シミュレーション・実データ CV・lambda 並列実験・ブートストラップ信頼区間まで回すための研究実装です。
 
-1. **Estimator API は 1 クラスに集約**
-   `fit / predict` を提供し、ハイパーパラメータは `__init__` 引数に置く（sklearn流）。
-2. **ADMM の状態（z,u,ρなど）は “学習後属性” として保持**
-   sklearn の規約に合わせて末尾 `_` を付ける。
-3. **目的関数・微分・積分近似は内部コンポーネントに分離**
-   将来、B-spline→M/I-spline（積分不要化の検討）へ差し替えやすくする
+## 現在の実装状況を優先する
 
----
+古い設計メモより、現在のコードと最近のドキュメントを優先してください。
 
-## 1) 外側：Estimator 本体（sklearn 互換の“顔”）
+- 評価指標の主役は `c_td` です。`ADMMHazardAFT.score()` も現在は近似対数尤度ではなく `c_td` を返します。
+- `docs/ctd-index.md` は `c_td` の定義の根拠です。Comparable pair は `(T_i < T_j, D_i = 1)`、concordant 条件は `S(T_i | X_i) < S(T_i | X_j)`、tie は 0.5 点、comparable pair が無ければ `NaN` です。
+- lambda 並列実験は `docs/lambda_experiments.md`、実データ CV は `docs/real_cv.md` の運用に合わせます。
+- `outputs/` や `data/` には実験生成物・大きな結果が多いので、必要がない限り触らないでください。特に未追跡の `outputs/real_cv/...` はユーザー作業物として扱い、削除・整理しないでください。
 
-### `ADMMHazardAFT`（BaseEstimator 互換）
+## 主要コマンド
 
-**責務**
+- テスト: `uv run pytest`
+- 主要な個別テスト:
+  - `uv run pytest tests/test_evaluator_c_td.py`
+  - `uv run pytest tests/test_admm_fit_smoke.py`
+  - `uv run pytest tests/test_main_eval_data_cli.py`
+  - `uv run pytest tests/test_real_cv_preprocessing.py`
+  - `uv run pytest tests/test_bootstrap_parameter_ci_cli.py`
+  - `uv run pytest tests/test_compute_cox_metrics_smoke.py`
+- CLI 実行: `uv run main.py --config config.toml --data <long-format.csv> --output <result.json>`
+- 依存は `pyproject.toml` と `uv.lock` で管理します。現状の `requires-python` は `>=3.14` です。
 
-* 入力検証、学習ループ呼び出し、推論 API の提供
-* `coef_` / `baseline_` / `history_` など学習結果の保持
-* sklearn clone / GridSearch に耐える（`__init__` のみがハイパラ）
+## データ形式
 
-**主な `__init__` 引数（ハイパーパラメータ）**
+`main.py` とブートストラップは long format CSV を前提にします。
 
-* モデル構造：
+- 必須列: `id`, `k`, `time`, `event`
+- 追加列: 特徴量列。`id`, `k`, `time`, `event`, `time_true`, `c1`, `c2` は特徴量から除外します。
+- 各 `id` は `k = 0..K-1` のちょうど `K` 行を持つ必要があります。
+- `main.py` 内では `X.shape == (n_subjects, K, p)`、`y.shape == (n_subjects, 2)` に変換します。
+- `y[:, 0]` は観測時刻、`y[:, 1]` は event 0/1 です。
+- `<data>.meta.json` に `time_grid` があれば、config の `time_grid` より優先されます。
 
-  * `time_grid`: `(t0,...,tK)`（区間端点。β(t)の区分一定を決める）
-  * `baseline_basis`: `"bspline"` or `"mspline5"`（将来差し替え前提）
-  * `n_baseline_basis: int`（B-spline の M）
-* 近似：
+予測 API は 2D `X.shape == (n, p)` も受け取り、その場合は全区間に同じ特徴量を繰り返します。3D 入力では `coef_` と同じ `K` が必要です。
 
-  * `quadrature: {"Q": int, "rule": "gauss_legendre" | "simpson" ...}`（式(6)のQ）
-* 正則化とADMM：
+## 公開 Estimator
 
-  * `lambda_fuse: float`（式(2)）
-  * `rho: float`
-  * `max_admm_iter: int`
-  * `admm_tol_primal, admm_tol_dual: float`
-  * `newton_steps_per_admm: int`（inexact Newton：ADMM内で1回/数回で止める、という方針）
-* 収束/数値安定：
+### `ADMMHazardAFT`
 
-  * `max_newton_iter, newton_tol`
-  * `clip_eta: float`（exp(η) の発散抑制）
-  * `random_state`（初期値用）
+責務:
 
-**学習後属性（末尾 `_`）**
+- 入力検証、内部コンポーネント構築、ADMM ソルバ呼び出し、予測 API の提供
+- `coef_`, `gamma_`, `z_`, `u_`, `rho_`, `history_`, `baseline_`, `time_partition_`, `quadrature_`, `objective_` など学習後属性の保持
+- `from_config(config)` による TOML/JSON config からの構築
+- `load_params_from_result_json()` による predict-only 用の復元
 
-* `coef_`: shape `(K, p)`
-* `gamma_`: baseline スプライン係数（あなたの記法の γ）
-* `time_grid_`, `n_features_in_`, `feature_names_in_`（可能なら）
-* ADMM 状態：
+重要な `__init__` ハイパーパラメータ:
 
-  * `z_`: fused lasso 用補助変数（各 j の z_j、式(4)）
-  * `u_`: scaled dual（各 j の u_j、式(5)）
-  * `rho_`: 実効ρ（適応ρをやるなら更新後の値）
-* `history_`: 目的関数、primal/dual residual、Newton step など（デバッグ必須）
+- モデル: `time_grid`, `baseline_basis`, `n_baseline_basis`, `baseline_knot_margin`
+- 求積: `quadrature`
+- 正則化/ADMM: `lambda_fuse`, `rho`, `max_admm_iter`, `admm_tol_primal`, `admm_tol_dual`, `admm_tol_rel`
+- 停滞判定: `admm_stagnation_tol`, `admm_stagnation_patience`
+- Newton/line search: `newton_steps_per_admm`, `max_newton_iter`, `newton_tol`, `line_search_max_steps`, `line_search_shrink`, `line_search_c1`
+- 数値安定化: `return_best_iterate`, `clip_eta`, `random_state`
 
-**公開メソッド**
+公開メソッド:
 
-* `fit(X, y)`
+- `fit(X, y) -> self`
+- `predict_survival_function(X, times=None)`
+- `predict_cumulative_hazard(X, times=None)`
+- `score(X, y) -> float`: 現在は `c_td`
+- `predict_risk_score()` は未実装です。使う場合は実装とテストを追加してください。
 
-  * y は sklearn 風にするなら `(time, event)` の2列を推奨（例：`y[:,0]=T, y[:,1]=delta`）
-* `predict_survival_function(X, times=None)`
+sklearn 風の方針は維持します。`__init__` はハイパーパラメータ保存だけにし、副作用を入れないでください。
 
-  * 生存関数 S(t|X)
-* `predict_cumulative_hazard(X, times=None)`
+## 内部コンポーネント
 
-  * Λ(t|X)
-* `predict_risk_score(X, time=None)`
+クラス境界は次を維持します。
 
-  * η_i(t) ないし平均リスク（スコア用途）
-* `score(X, y)`
-
-  * 既定は（負の）近似対数尤度 `log \tilde{L}` を返すのが筋（CVで使える）
-
----
-
-## 2) 内部：目的関数（対数尤度・勾配・ヘッセ）
+- `ADMMHazardAFT`
+  - `FusedLassoADMMSolver`
+    - `HazardAFTObjective`
+      - `BaselineHazardModel` / `BSplineBaseline`
+      - `TimePartition`
+      - `QuadratureRule`
 
 ### `HazardAFTObjective`
 
-**責務**
+- 近似負対数尤度、β/γ の勾配、ヘッセを提供します。
+- ソルバが微分式を知らない構成を守ってください。
+- `clip_eta` による `exp(eta)` の発散抑制は重要です。
 
-* あなたの定義する `log \tilde{L}`（区分求積近似）を計算し、勾配・ヘッセを返す
+### `BSplineBaseline`
 
-  * 対数尤度（式(6)）
-  * β 勾配・ヘッセ（式(12)(13)）
-  * γ 勾配・ヘッセ（式(14)(15)）
-
-**持つべき依存（コンストラクタ注入）**
-
-* `baseline: BaselineHazardModel`
-* `time_partition: TimePartition`
-* `quadrature: QuadratureRule`
-
-**メソッド（内部用）**
-
-* `value(beta, gamma, X, T, delta) -> float`（= -log \tilde{L} でもよい）
-* `grad(beta, gamma, ...) -> (g_beta, g_gamma)`
-* `hess(beta, gamma, ...) -> (H_bb, H_bg, H_gg)`
-  ※ 最小実装なら **ブロック対角近似**（H_bg無視）にして Newton を軽くする選択も現実的
-
----
-
-## 3) 内部：ベースラインハザードの表現
-
-あなたの現状案は B-spline（log hazard を spline）で、積分は求積で近似する方針。 
-将来、M/I-spline（積分を解析的に）へ移行する可能性があるので、**ここはインターフェースを切るのが最重要**です。
-
-### `BaselineHazardModel`（抽象）
-
-**責務**
-
-* `S_m(x)`（基底値）と必要なら `S'_m(x), S''_m(x)` を返す（あなたの微分式に相当）
-* 実装により「log hazard」「hazard」をどちらで表すかは隠蔽
-
-**インターフェース**
-
-* `basis(x) -> (n, M)`
-* `basis_deriv(x) -> (n, M)`（必要なら）
-* `basis_second_deriv(x) -> (n, M)`（必要なら）
-
-### 実装
-
-* `BSplineBaseline`（現行案）
-
----
-
-## 4) 内部：時間分割と η の扱い
+- 現行の baseline は B-spline です。
+- 将来 M/I-spline へ差し替えられるよう、baseline 表現は `BaselineHazardModel` のインターフェース内に閉じ込めます。
+- `baseline_knot_margin` と実データの最大時刻から knot range が決まります。
 
 ### `TimePartition`
 
-**責務**
-
-* `time_grid` を保持し、各個体の `k(i)` と、区間ごとの積分範囲 `[a_{ik}, b_{ik}]` を生成
-
-  * あなたの記法の `a_{ik}=t_{k-1}`, `b_{ik}=min(T_i,t_k)` に一致
-* β を `(K, p)` で持つ前提で、η_{ik} を一括生成
-
-**メソッド**
-
-* `interval_index(T) -> k(i)`
-* `iter_intervals(T) -> list[(k, a, b)]`
-* `eta(beta, X) -> (n, K)` （ベクトル化が効くと速度が出る）
-
----
-
-## 5) 内部：求積（Quadrature）
+- `time_grid` を保持し、区間 index、区間積分範囲、`eta(beta, X)` を扱います。
+- β は `(K, p)`、X は原則 `(n, K, p)` です。
 
 ### `QuadratureRule`
 
-**責務**
+- 区間 `[a, b]` に対する求積点と重みを返します。
+- 最小実装は Gauss-Legendre 固定でよいですが、既存 API を壊さないでください。
 
-* 各 `(a,b)` に対し求積点 `v_{ikℓ}` と重み `w_{ikℓ}` を返す（式(6)の近似）
+## ADMM ソルバ
 
-**メソッド**
+`FusedLassoADMMSolver` は fused lasso 付き最適化を担当します。
 
-* `nodes_weights(a, b) -> (v: (Q,), w: (Q,))`
+- `Dβ` は行列を作らず `beta[1:] - beta[:-1]` として扱います。
+- `z` 更新は soft-thresholding、`u` は scaled dual update です。
+- β/γ 更新はブロック座標で、gamma 更新後に beta 更新を行います。
+- Newton step は line search 付きです。特異ヘッセに対して damping/fallback を使っています。
+- `return_best_iterate=True` の挙動を壊さないでください。
 
-最小実装なら、ガウス・ルジャンドル固定で十分です（外部依存を減らせる）。
+`history_` はデバッグと集計の契約です。少なくとも次のキーを維持してください。
 
----
+- `objective`
+- `neg_loglik`
+- `primal_residual`
+- `dual_residual`
+- `rho`
+- `primal_tolerance`
+- `dual_tolerance`
+- `objective_relative_change`
+- `stagnation_count`
+- `newton_steps`
+- `beta_step_norm`
+- `gamma_step_norm`
+- `stopping_reason`
+- `n_admm_iter`
 
-## 6) 内部：ADMM ソルバ（ここを単体テスト可能にする）
+収束判定では絶対許容誤差だけでなく `admm_tol_rel` を含む Boyd 型の許容誤差を使います。停滞判定は `admm_stagnation_tol` と `admm_stagnation_patience` に従います。
 
-### `FusedLassoADMMSolver`
-
-**責務**
-
-* ADMM 反復（式(3)(4)(5)）を回し、β・γ・z・u を更新する
-* `β,γ` 更新は「Objective + inexact Newton」を呼ぶだけにする（ソルバが微分を知らない）
-
-**インターフェース**
-
-* `solve(beta0, gamma0, X, T, delta) -> (beta, gamma, z, u, history)`
-
-**内部の更新**
-
-* `(β, γ)` 更新：
-
-  * 目的関数 `F(β,γ) = -log\tilde{L}(β,γ) + (ρ/2)∑||Dβ_j - z_j + u_j||^2` を最小化 
-  * 実装簡略化のため、資料の方針通り **(1) γ 更新 → (2) β 更新**のブロック座標（damped Newton）にすると楽（式の整備もできている）
-* `z` 更新（prox）：soft-thresholding（一般化ラッソのproxと同型）
-* `u` 更新：scaled dual update（そのまま）
-
-**`D` の扱い**
-
-* `DifferenceMatrix(K)` を別クラスにせず、`D @ beta_j` / `D.T @ v` は「差分」「逆差分」演算として実装すると軽い
-
-  * `Dβ = beta[1:]-beta[:-1]`
-  * `D.T r` もO(K)で書ける（行列を作らない）
-
----
-
-## 7) scikit-learn 風に見せるための最小セット
-
-最小で「それっぽく見える」ために、Estimator 側はこれだけ守れば十分です。
-
-* `__init__` は引数を属性に保存するだけ（副作用なし）
-* `fit(X, y)`：
-
-  * `self.n_features_in_`
-  * `self.coef_`, `self.gamma_`, `self.z_`, `self.u_`
-  * `return self`
-* `predict_*` 系は `check_is_fitted` 相当を通す
-* `score` は `log \tilde{L}`（もしくは -loss）を返す 
-
----
-
-## 8) 具体的なクラスツリー（提案）
-
-最小構成で、これ以上割らないのが「シンプル」と「拡張性」の妥協点です。
-
-* `ADMMHazardAFT`（公開 Estimator）
-
-  * uses `FusedLassoADMMSolver`
-
-    * uses `HazardAFTObjective`
-
-      * uses `BaselineHazardModel`（`BSplineBaseline` or `MSpline5Baseline`）
-      * uses `TimePartition`
-      * uses `QuadratureRule`
-
----
-
-## 9) 実装上の注意（簡単に詰む箇所だけ）
-
-* **exp(η) が暴れる**：`clip_eta` を必須にする（推定が発散したときの保険）
-* **ADMM の stopping**：primal/dual residual を履歴に残す（z,u の収束が見えないとデバッグ不能）
-
----
-
-## 10) 評価・メトリクス（Metric / Evaluator）と監視
-
-学習アルゴリズム（ADMM）や目的関数の実装とは独立に、**学習結果の定量評価・モデル比較・運用監視**を行うためのクラスを用意する。
-Estimator 本体（`ADMMHazardAFT`）は `fit/predict/score` に集中し、評価は別コンポーネントに切り出す。
+## 評価指標
 
 ### `HazardAFTEvaluator`
 
-**責務**
+- `evaluate(model, X, y, times=None) -> {"c_td": float}`
+- `compare(models, X, y, times=None) -> dict`
+- `compute_c_td(...)` が定義式の本体です。
 
-* 学習済みモデル（`ADMMHazardAFT`）に対して、データセット上の評価指標を計算する
-* 実験比較（複数モデル/複数ハイパラの横並び評価）に必要な形で結果を集約する
-* 運用監視向けに、評価値の時系列（スプリット/期間別）を出力できる形にする
+`times` を明示する場合は、全 event time を含める必要があります。含まれていない場合は `ValueError` になります。
 
-**入力の想定**
+近似対数尤度や BIC は実験集計では使いますが、`score()` の意味とは分けて扱ってください。
 
-* `X`: 特徴量
-* `y`: `(time, event)` の2列（Estimator と同じ）
-* `times`: 予測を比較する時間点の配列（必要な指標のみ）
+## CLI と result.json
 
-**最小インターフェース案**
+### `main.py`
 
-* `evaluate(model, X, y, times=None) -> dict[str, float]`
-  * 代表例：近似対数尤度（`log \\tilde{L}` または `-loss`）、`score` と整合するスカラー
-* `compare(models: dict[str, ADMMHazardAFT], X, y, times=None) -> dict[str, dict[str, float]]`
-  * モデル名→指標辞書（表として出しやすい）
-* `monitor(model, X, y, split_by=None, times=None) -> dict`
-  * 期間（例：月次）や属性（例：施設/地域）で分割して指標を返すための器
+通常 fit:
 
-**指標の方針（実装順）**
+```bash
+uv run main.py \
+  --config config.toml \
+  --data data/extended_aft_step/example.csv \
+  --output outputs/example_result.json
+```
 
-* まずは確実に定義がブレない **学習目的と同じ指標**（近似対数尤度）を実装し、再現性のある比較を可能にする
-* 追加の予測性能指標（例：ランキング系/確率校正系）は、必要になった時点で「定義（どの時間点・打ち切り扱い）」を明示して追加する
+評価用 test data を別に渡す場合:
 
----
+```bash
+uv run main.py \
+  --config config.json \
+  --data train.csv \
+  --eval-data test.csv \
+  --output result.json
+```
 
-## 11) WandB（Weights & Biases）でのロギング
+predict-only:
 
-**目的**
+```bash
+uv run main.py \
+  --config config.toml \
+  --data data.csv \
+  --load-result outputs/support2_result.json \
+  --predict-times 1.0,2.0,3.0 \
+  --output prediction.json
+```
 
-* 学習中の収束状況（ADMMの残差・目的関数・ステップ）と、評価指標（上記 Evaluator）を一元的に記録する
-* モデル比較・監視のため、ハイパーパラメータと学習後属性（要約）を紐づけて保存する
+fit の `result.json` は主に次を持ちます。
 
-**設計方針**
+- `data_path`, `eval_data_path`
+- `n_samples`, `n_eval_samples`, `n_features`, `feature_cols`
+- `time_grid`, `coef`, `gamma`, `z_last`
+- `history`
+- `summary.objective_last`, `summary.neg_loglik_last`
+- `summary.primal_residual_last`, `summary.dual_residual_last`
+- `summary.stopping_reason`, `summary.n_admm_iter`
+- `summary.c_td`, `summary.c_td_train`, `summary.c_td_test`
+- `config`
 
-* WandB は **任意依存** とし、未インストールでも学習自体は動く（ログだけ無効化）
-* ロギング処理は Estimator から分離し、`history_` と Evaluator の結果を「外側」で送る
-  * 例：学習ループの各ADMM反復で `history_` を更新し、Logger がそれを引き取って `wandb.log()` する
+この構造は集計スクリプトが読むため、キー名を変更する場合は集計・可視化・テストも同時に更新してください。
 
-### `WandBLogger`（任意）
+## Lambda 並列実験
 
-**責務**
+`docs/lambda_experiments.md` に従います。
 
-* `wandb.init()`（run名、config=ハイパーパラメータ）
-* 学習ログ：`history_`（目的関数、primal/dual residual、ρ、Newton step など）を step 付きで記録
-* 評価ログ：`HazardAFTEvaluator.evaluate()` の結果を記録（train/valid/test を区別）
-* アーティファクト：`coef_`/`gamma_` の要約（例：ノルム、変化点数など）や、必要なら生存曲線の簡易プロット
+- lambda 値は `lambda_grid.json` の `lambda_values` で管理します。
+- 生成は `uv run scripts/generate_lambda_grid.py`。
+- 実行は `run_lambda_experiment.sh`。`SGE_TASK_ID` から `data_idx` と `lambda_idx` を決めます。
+- qsub は `qsub.sh`。タスク数は `データ数 × lambda数` に合わせます。
+- 出力先は `outputs/lambda_experiments/{data_name}/lambda_{value}/result.json`。
+- 集計は `uv run scripts/aggregate_lambda_results.py --base-dir outputs/lambda_experiments --output outputs/lambda_summary.csv`。
+- 可視化は `uv run scripts/visualize_lambda_results.py --summary outputs/lambda_summary.csv --output-dir outputs/lambda_plots`。
 
-**最小インターフェース案**
+集計 CSV の重要列:
 
-* `start_run(config: dict, name: str | None = None, tags: list[str] | None = None)`
-* `log_fit(history_row: dict, step: int)`
-* `log_metrics(metrics: dict[str, float], step: int | None = None, prefix: str | None = None)`
-* `finish()`
+- `data_name`
+- `lambda_fuse`
+- `objective_last`
+- `neg_loglik_last`
+- `primal_residual_last`
+- `dual_residual_last`
+- `c_td`
+- `n_params`: `z_last` の非ゼロ数
+- `bic`
+- `rho`, `max_admm_iter`, `clip_eta`
+- `result_path`
 
-**ログに残す推奨項目（最低限）**
+BIC は `n_params` と `neg_loglik_last` から計算します。`z_tol` の既定は `1e-8` です。
 
-* ハイパーパラ：`lambda_fuse`, `rho`, `time_grid`, `n_baseline_basis`, `quadrature`, `newton_steps_per_admm`, `clip_eta`
-* 収束：primal residual, dual residual, 目的関数（または -log\\tilde{L} + penalty）
-* 主要評価：`score` と同義の指標（近似対数尤度）
+## Cox 比較
 
----
+`scripts/compute_cox_metrics.py` は ADMM と比較する CoxPH ベースラインを計算します。
 
-## 12) スパコン環境でのパラメータ並列（多数ジョブ）と結果集計の考慮
+- `lifelines.CoxPHFitter` を使います。
+- `HazardAFTEvaluator` と互換の adapter で `c_td_cox` を計算します。
+- Harrell の C-index は `c_index_harrell` です。
+- `--lambda-summary` を渡すと ADMM の lambda 集計と結合し、`outputs/cox_vs_lambda_c_td.csv` のような比較表を作れます。
+- `scripts/visualize_lambda_results.py --cox-summary <csv>` で `lambda_vs_c_td_with_cox.png` を生成します。
 
- **ハイパーパラメータ探索をパラメータ並列**（多数ジョブ）で回し、後から結果をまとめて確認しやすくするための設計上の注意点。
-アルゴリズムの高速化や分散学習はまだ実装せず、**実験運用上の再現性・集計容易性**を優先する。
+## 実データ CV
 
-### 12.1 設定（config）の外部化と再現性
+`docs/real_cv.md` に従います。Support2 と Framingham は同じ実行コードを使い、dataset 固有の raw -> base 変換だけ `scripts/real_cv/datasets.py` に分けます。
 
-* 1ジョブ=1設定（config）を原則とし、config は **JSON/YAML 等でシリアライズ可能**にする
-  * `ADMMHazardAFT.__init__` のハイパーパラメータのみを config として保存できる形にする（sklearn clone 互換の思想）
-* 乱数の扱い：`random_state` を必須級にし、初期値依存がある箇所は seed を明示して再現できるようにする
-* 入力データの同一性を担保するため、データの識別子（ファイルパス、ハッシュ、スプリットseed等）を結果に必ず残す
+主要ファイル:
 
-### 12.2 出力の規約（集計しやすい形式）
+- `scripts/real_cv/datasets.py`: dataset 固有の前処理定義
+- `scripts/real_cv/common.py`: fold 分割、train 基準の標準化、long format 化
+- `scripts/real_cv/make_splits.py`: id 単位の fold 割当作成
+- `scripts/real_cv/prepare_fold.py`: 1 fold の train/test CSV、config、meta 作成
+- `scripts/real_cv/aggregate_results.py`: fold 別・lambda 別の集計
+- `run_real_cv_experiment.sh`: `lambda_fuse × fold` の 1 task 実行
+- `qsub_real_cv.sh`: SGE array job
 
-* 各ジョブは機械可読な結果を必ず出力する（例：`metrics.json` もしくは 1行1run の `results.jsonl`）
-  * 推奨：`metrics`（評価指標）・`config`（ハイパーパラ）・`summary`（学習後属性の要約）・`runtime`（学習時間など）
-* ファイル/ディレクトリ命名：run を一意に識別できる `run_id`（UUIDやハッシュ）を付与し、
-  `outputs/{experiment_name}/{run_id}/` のように衝突しない構成にする
-* `history_` は肥大化しやすいので、
-  * （A）最後の値のみを `summary` に入れる（primal/dual residual、目的関数など）
-  * （B）全履歴は `history.jsonl` 等で別出力
-  のように分離して集計を軽くする
+運用の重要点:
 
-### 12.3 まとめ確認（比較・集計の導線）
+- split は実行前に 1 回だけ作ります。
+- fold 分割は id 単位で行います。必要に応じて event で層化します。
+- 連続特徴量の標準化は train fold の平均・標準偏差だけで train/test に適用します。
+- Framingham は `time_scale_max=8766.0`、Support2 は train fold の最大 `time_original` を基準に time を `time_grid` 範囲へスケールします。
+- `lambda_grid.json` が 10 点、`N_FOLDS=5` なら qsub の task は 50 です。
+- `SGE_TASK_ID` の対応は `lambda_idx = task_idx // n_folds`, `fold_idx = task_idx % n_folds` です。
+- 出力先は `outputs/real_cv/{dataset}/{experiment_name}/lambda_{value}/fold_{xx}/` です。
 
-* `HazardAFTEvaluator.compare()` が返す「モデル名→指標辞書」は、並列実験の集計でもそのまま使える形（dict of dict）に保つ
-* 多数runの集計は「外側のスクリプト」で行う前提とし、最低限次を満たす
-  * `results.jsonl` を読み込み、指標でソートして上位を表示できる
-  * config と metrics を結合して表にできる（CSV/Parquetに落とすなど）
+代表コマンド:
+
+```bash
+uv run scripts/real_cv/make_splits.py \
+  --dataset support2 \
+  --input data/real/support/support2.csv \
+  --output data/real/cv/splits/support2/support2_5fold_seed1234.csv \
+  --n-folds 5 \
+  --random-state 1234
+
+qsub qsub_real_cv.sh
+
+uv run scripts/real_cv/aggregate_results.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234
+```
+
+Framingham は `qsub -v DATASET=framingham qsub_real_cv.sh` を使います。
+
+## ブートストラップ信頼区間
+
+`scripts/bootstrap_parameter_ci.py` は long-format CSV を被験者単位でリサンプリングし、`coef` と `gamma` の percentile 信頼区間を出します。
+
+主要仕様:
+
+- `--data`: long-format CSV
+- `--config`: TOML/JSON config
+- `--base-result`: 既存 `result.json` があれば点推定値を再 fit せず読みます
+- `--n-bootstrap`, `--ci-level`, `--random-state`, `--n-jobs`
+- 失敗 replicate は `failures` に記録して、成功分があれば集計を継続します
+- JSON に NaN/inf を混ぜないよう `None` へ変換します
+- CSV は `*_coef_ci.csv` と `*_gamma_ci.csv` を出します
+
+実データ用の入口は `run_real_bootstrap_ci.sh` です。
+
+- Support2 は `data/real/support/prepare_support2_inference.py` を先に実行します。
+- `outputs/support2_result.json` や `outputs/framingham_result_bp.json` があれば `--base-result` として利用します。
+- 出力例: `outputs/support2_bootstrap_ci.json`, `outputs/framingham_bootstrap_ci.json`
+
+## WandB
+
+WandB は任意依存です。
+
+- `WANDB_PROJECT` または `WANDB_ENABLED=1` がある場合だけ有効化します。
+- 未利用・未インストールでも学習は動くようにしてください。
+- `history_` と summary metrics を外側から送る設計を維持します。
+
+## 実装時の注意
+
+- 既存の実験結果、未追跡の `outputs/`、raw data を勝手に削除・再生成しないでください。
+- `result.json` のキー、`summary` のキー、CSV の列名は実験スクリプト間の契約です。変更する場合は関連スクリプトとテストをまとめて更新してください。
+- `score()` は `c_td` です。ログ尤度系の指標を追加する場合は別名の metric として扱ってください。
+- `c_td` の仕様変更は `docs/ctd-index.md` と `tests/test_evaluator_c_td.py` を同時に更新してください。
+- real CV の dataset 固有処理は `scripts/real_cv/datasets.py` に閉じ込め、共通処理は `common.py` に置いてください。
+- 実験スクリプトは SGE 環境とローカル 1 task 実行の両方を壊さないでください。
+- `clip_eta`、line search、ADMM 停止判定、`return_best_iterate` は数値安定性のための重要部品です。周辺を変更したら smoke test だけでなく履歴キーと停止理由も確認してください。
+- shell script の `UV_BIN` 既定値はスパコン環境向けです。ローカル実行時は `UV_BIN=$(which uv)` などで上書きできます。

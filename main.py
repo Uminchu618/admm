@@ -13,6 +13,7 @@
 """
 
 import argparse
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,17 @@ from admm.logger import WandBLogger, wandb_available
 from admm.model import ADMMHazardAFT
 
 
+@dataclass
+class LongFormatDataset:
+    """main.py が扱う long format CSV を NumPy 配列にしたもの。"""
+
+    X: np.ndarray
+    y: np.ndarray
+    feature_cols: list[str]
+    k_count: int
+    n_subjects: int
+
+
 def _parse_predict_times(raw: Optional[str]) -> Optional[list[float]]:
     """カンマ区切り文字列を予測時刻リストへ変換する。"""
     if raw is None:
@@ -47,6 +59,65 @@ def _parse_predict_times(raw: Optional[str]) -> Optional[list[float]]:
     if len(times) == 0:
         return None
     return times
+
+
+def _load_long_format_dataset(data_path: Path) -> LongFormatDataset:
+    """long format CSV を ADMMHazardAFT の入力配列へ変換する。"""
+
+    data = pd.read_csv(data_path)
+    required_cols = {"id", "k", "time", "event"}
+    if not required_cols.issubset(data.columns):
+        missing = sorted(required_cols - set(data.columns))
+        raise ValueError(
+            f"Missing required columns in {data_path} (long format): {missing}"
+        )
+
+    feature_cols = [
+        col
+        for col in data.columns
+        if col
+        not in {
+            "id",
+            "k",
+            "time",
+            "event",
+            "time_true",
+            "c1",
+            "c2",
+        }
+    ]
+
+    data_sorted = data.sort_values(["id", "k"]).reset_index(drop=True)
+    k_values = data_sorted["k"].to_numpy()
+    if k_values.size == 0:
+        raise ValueError(f"Empty dataset: {data_path}")
+    if k_values.min() < 0:
+        raise ValueError("k must be non-negative in long format")
+
+    k_count = int(k_values.max()) + 1
+    group_sizes = data_sorted.groupby("id", sort=True)["k"].size().to_numpy()
+    if not np.all(group_sizes == k_count):
+        raise ValueError("Each id must have exactly K rows in long format")
+
+    expected_k = np.tile(np.arange(k_count), group_sizes.size)
+    if not np.array_equal(k_values, expected_k):
+        raise ValueError("k must be 0..K-1 in order for each id")
+
+    X = (
+        data_sorted[feature_cols]
+        .to_numpy()
+        .reshape(group_sizes.size, k_count, len(feature_cols))
+    )
+    y_rows = data_sorted.iloc[::k_count]
+    y = y_rows[["time", "event"]].to_numpy()
+
+    return LongFormatDataset(
+        X=X,
+        y=y,
+        feature_cols=feature_cols,
+        k_count=k_count,
+        n_subjects=int(group_sizes.size),
+    )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -91,6 +162,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         default=None,
         help="Path to write result JSON (optional).",
     )
+    parser.add_argument(
+        "--eval-data",
+        type=Path,
+        default=None,
+        help="Optional long-format CSV used only for evaluation after fitting.",
+    )
 
     # --plot 引数:
     # - β のステッププロットを保存するか
@@ -133,7 +210,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # データを読み込み、fit を呼び出す（fit 本体は未実装のため例外はそのまま伝播する）。
     data_path = args.data
-    data = pd.read_csv(data_path)
     meta_path = Path(f"{data_path}.meta.json")
     if meta_path.exists():
         with meta_path.open("r", encoding="utf-8") as handle:
@@ -147,6 +223,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         {
             "config_path": str(args.config),
             "data_path": str(args.data),
+            "eval_data_path": (
+                str(args.eval_data) if args.eval_data is not None else None
+            ),
             "output_path": str(args.output) if args.output is not None else None,
             "load_result": (
                 str(args.load_result) if args.load_result is not None else None
@@ -157,49 +236,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         }
     )
 
-    required_cols = {"id", "k", "time", "event"}
-    if not required_cols.issubset(data.columns):
-        missing = sorted(required_cols - set(data.columns))
-        raise ValueError(
-            f"Missing required columns in {data_path} (long format): {missing}"
-        )
+    train_data = _load_long_format_dataset(data_path)
+    X = train_data.X
+    y = train_data.y
+    feature_cols = train_data.feature_cols
 
-    feature_cols = [
-        col
-        for col in data.columns
-        if col
-        not in {
-            "id",
-            "k",
-            "time",
-            "event",
-            "time_true",
-            "c1",
-            "c2",
-        }
-    ]
-    data_sorted = data.sort_values(["id", "k"]).reset_index(drop=True)
-    k_values = data_sorted["k"].to_numpy()
-    if k_values.size == 0:
-        raise ValueError(f"Empty dataset: {data_path}")
-    if k_values.min() < 0:
-        raise ValueError("k must be non-negative in long format")
-    k_count = int(k_values.max()) + 1
-    group_sizes = data_sorted.groupby("id", sort=True)["k"].size().to_numpy()
-    if not np.all(group_sizes == k_count):
-        raise ValueError("Each id must have exactly K rows in long format")
-
-    expected_k = np.tile(np.arange(k_count), group_sizes.size)
-    if not np.array_equal(k_values, expected_k):
-        raise ValueError("k must be 0..K-1 in order for each id")
-
-    X = (
-        data_sorted[feature_cols]
-        .to_numpy()
-        .reshape(group_sizes.size, k_count, len(feature_cols))
-    )
-    y_rows = data_sorted.iloc[::k_count]
-    y = y_rows[["time", "event"]].to_numpy()
+    eval_data = None
+    if args.eval_data is not None:
+        eval_data = _load_long_format_dataset(args.eval_data)
+        if eval_data.feature_cols != feature_cols:
+            raise ValueError("eval-data の特徴量列が train data と一致しません。")
+        if eval_data.k_count != train_data.k_count:
+            raise ValueError("eval-data の K が train data と一致しません。")
 
     prediction_times = _parse_predict_times(args.predict_times)
 
@@ -276,7 +324,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # 余計なキーや型不一致があれば TypeError が発生し得る。
     model = ADMMHazardAFT.from_config(config)
     model.fit(X, y)
-    c_td = model.score(X, y)
+    c_td_train = model.score(X, y)
+    c_td_eval = None
+    if eval_data is not None:
+        c_td_eval = model.score(eval_data.X, eval_data.y)
+    c_td = c_td_eval if c_td_eval is not None else c_td_train
 
     # 推定された β を見やすく表示する。
     coef = model.coef_
@@ -302,13 +354,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     last_dr = (
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
+    stopping_reason = model.history_.get("stopping_reason")
+    n_admm_iter = model.history_.get("n_admm_iter", len(model.history_["objective"]))
     print(
         {
             "objective": last_obj,
             "neg_loglik": last_neg_loglik,
             "primal_residual": last_pr,
             "dual_residual": last_dr,
+            "stopping_reason": stopping_reason,
+            "n_admm_iter": n_admm_iter,
             "c_td": c_td,
+            "c_td_train": c_td_train,
+            "c_td_test": c_td_eval,
         }
     )
     print("\n=== ADMM last z (z_) ===")
@@ -340,7 +398,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         result = {
             "data_path": str(data_path),
+            "eval_data_path": str(args.eval_data) if args.eval_data else None,
             "n_samples": int(X.shape[0]),
+            "n_eval_samples": (
+                int(eval_data.X.shape[0]) if eval_data is not None else None
+            ),
             "n_features": int(X.shape[2]),
             "feature_cols": feature_cols,
             "time_grid": list(map(float, time_grid)),
@@ -353,7 +415,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "stopping_reason": stopping_reason,
+                "n_admm_iter": n_admm_iter,
                 "c_td": c_td,
+                "c_td_train": c_td_train,
+                "c_td_test": c_td_eval,
             },
             "config": config,
         }
@@ -370,7 +436,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "stopping_reason": stopping_reason,
+                "n_admm_iter": n_admm_iter,
                 "c_td": c_td,
+                "c_td_train": c_td_train,
+                "c_td_test": c_td_eval,
                 "z_last": model.z_.tolist(),
             },
             prefix="summary",

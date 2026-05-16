@@ -66,6 +66,9 @@ class ADMMHazardAFT:
         max_admm_iter: int = 1000,
         admm_tol_primal: float = 1e-4,
         admm_tol_dual: float = 1e-4,
+        admm_tol_rel: float = 1e-3,
+        admm_stagnation_tol: float = 1e-10,
+        admm_stagnation_patience: int = 10,
         newton_steps_per_admm: int = 1,
         max_newton_iter: int = 50,
         newton_tol: float = 1e-6,
@@ -87,6 +90,9 @@ class ADMMHazardAFT:
         self.max_admm_iter = max_admm_iter
         self.admm_tol_primal = admm_tol_primal
         self.admm_tol_dual = admm_tol_dual
+        self.admm_tol_rel = admm_tol_rel
+        self.admm_stagnation_tol = admm_stagnation_tol
+        self.admm_stagnation_patience = admm_stagnation_patience
         self.newton_steps_per_admm = newton_steps_per_admm
         self.max_newton_iter = max_newton_iter
         self.newton_tol = newton_tol
@@ -489,6 +495,9 @@ class ADMMHazardAFT:
             max_admm_iter=self.max_admm_iter,
             admm_tol_primal=self.admm_tol_primal,
             admm_tol_dual=self.admm_tol_dual,
+            admm_tol_rel=self.admm_tol_rel,
+            admm_stagnation_tol=self.admm_stagnation_tol,
+            admm_stagnation_patience=self.admm_stagnation_patience,
             newton_steps_per_admm=self.newton_steps_per_admm,
             max_newton_iter=self.max_newton_iter,
             newton_tol=self.newton_tol,
