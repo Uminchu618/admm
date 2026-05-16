@@ -62,6 +62,21 @@ uv run scripts/real_cv/aggregate_results.py \
   --base-dir outputs/real_cv/support2/support2_5fold_seed1234
 ```
 
+CV 結果の可視化:
+
+```bash
+uv run scripts/real_cv/visualize_results.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234
+```
+
+既定では `fold_results.csv`、`summary_by_lambda.csv` と、次の図を
+`outputs/real_cv/support2/support2_5fold_seed1234/plots/` に保存する。
+
+- `cv_lambda_vs_c_td.png`: fold 点、平均線、標準誤差つきの test `c_td`
+- `cv_train_test_c_td.png`: train/test `c_td` 平均の比較
+- `cv_fold_spaghetti.png`: fold 別 test `c_td` の lambda 軌跡
+- `cv_convergence_diagnostics.png`: ADMM iteration、残差、停止理由
+
 ローカルで 1 task だけ確認する場合:
 
 ```bash

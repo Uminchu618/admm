@@ -20,3 +20,5 @@ wheels/
 
 /outputs/lambda_experiments
 .DS_Store
+
+/outputs/real_cv/support2/support2_5fold_seed1234

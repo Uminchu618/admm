@@ -83,6 +83,8 @@ def collect_results(base_dir: Path) -> pd.DataFrame:
                 "neg_loglik_last": summary.get("neg_loglik_last"),
                 "primal_residual_last": summary.get("primal_residual_last"),
                 "dual_residual_last": summary.get("dual_residual_last"),
+                "stopping_reason": summary.get("stopping_reason"),
+                "n_admm_iter": summary.get("n_admm_iter"),
                 "result_path": str(result_path),
             }
         )
