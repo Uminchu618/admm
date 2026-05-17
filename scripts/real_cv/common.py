@@ -201,3 +201,54 @@ def build_fold_long_data(
         "standardization": standardization,
     }
     return train_long, test_long, summary
+
+
+def build_full_long_data(
+    base: pd.DataFrame,
+    time_grid: np.ndarray,
+    spec: RealDatasetSpec,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """全データを使う推定用の long format とメタ情報を作る。"""
+
+    if base["id"].duplicated().any():
+        raise ValueError("base must contain one row per id")
+
+    full_base = base.copy().reset_index(drop=True)
+    full_base, _, standardization = _standardize_fold(
+        train_base=full_base,
+        test_base=full_base.copy(),
+        continuous_cols=spec.continuous_feature_cols,
+    )
+
+    t0 = float(time_grid[0])
+    tK = float(time_grid[-1])
+    k_count = int(time_grid.size - 1)
+    time_scale_max = (
+        float(spec.time_scale_max)
+        if spec.time_scale_max is not None
+        else float(full_base["time_original"].max())
+    )
+    if time_scale_max <= 0:
+        raise ValueError("time scale max must be positive")
+
+    full_base = _add_scaled_outcome(full_base, t0, tK, time_scale_max)
+    full_long = to_long_format(full_base, k_count, spec.feature_cols)
+
+    summary = {
+        "dataset": spec.name,
+        "K": k_count,
+        "time_grid": time_grid.tolist(),
+        "t0": t0,
+        "tK": tK,
+        "n_samples": int(full_base.shape[0]),
+        "n_events": int(full_base["event"].sum()),
+        "rows": int(full_long.shape[0]),
+        "time_scale_max_original": time_scale_max,
+        "raw_feature_cols": spec.raw_feature_cols,
+        "feature_cols": spec.feature_cols,
+        "categorical_feature_cols": spec.categorical_feature_cols,
+        "categorical_reference_levels": spec.categorical_reference_levels,
+        "standardize_cols": spec.continuous_feature_cols,
+        "standardization": standardization,
+    }
+    return full_long, summary
