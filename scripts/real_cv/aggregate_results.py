@@ -64,6 +64,17 @@ def collect_results(base_dir: Path) -> pd.DataFrame:
         summary = result.get("summary", {})
         config = result.get("config", {})
         lambda_fuse = config.get("lambda_fuse", path_lambda)
+        n_train = result.get("n_samples")
+        lambda_fuse_effective = summary.get(
+            "lambda_fuse_effective",
+            result.get("history", {}).get("lambda_fuse_effective"),
+        )
+        if (
+            lambda_fuse_effective is None
+            and lambda_fuse is not None
+            and n_train is not None
+        ):
+            lambda_fuse_effective = float(n_train) * float(lambda_fuse)
 
         c_td_test = summary.get("c_td_test")
         if c_td_test is None:
@@ -73,8 +84,9 @@ def collect_results(base_dir: Path) -> pd.DataFrame:
             {
                 "dataset": result.get("dataset", path_dataset),
                 "lambda_fuse": lambda_fuse,
+                "lambda_fuse_effective": lambda_fuse_effective,
                 "fold": path_fold,
-                "n_train": result.get("n_samples"),
+                "n_train": n_train,
                 "n_test": result.get("n_eval_samples"),
                 "n_features": result.get("n_features"),
                 "c_td_train": summary.get("c_td_train"),

@@ -69,6 +69,17 @@ def collect_results(base_dir: Path, z_tol: float = 1e-8) -> pd.DataFrame:
         summary = result.get("summary", {})
         config = result.get("config", {})
         n_samples = result.get("n_samples")
+        lambda_fuse = config.get("lambda_fuse", path_lambda)
+        lambda_fuse_effective = summary.get(
+            "lambda_fuse_effective",
+            result.get("history", {}).get("lambda_fuse_effective"),
+        )
+        if (
+            lambda_fuse_effective is None
+            and lambda_fuse is not None
+            and n_samples is not None
+        ):
+            lambda_fuse_effective = float(n_samples) * float(lambda_fuse)
         n_params = count_nonzero_z(result.get("z_last"), z_tol)
         neg_loglik_last = summary.get("neg_loglik_last")
 
@@ -86,7 +97,8 @@ def collect_results(base_dir: Path, z_tol: float = 1e-8) -> pd.DataFrame:
         rows.append(
             {
                 "dataset": result.get("dataset", path_dataset),
-                "lambda_fuse": config.get("lambda_fuse", path_lambda),
+                "lambda_fuse": lambda_fuse,
+                "lambda_fuse_effective": lambda_fuse_effective,
                 "n_samples": n_samples,
                 "n_features": result.get("n_features"),
                 "objective_last": summary.get("objective_last"),

@@ -63,6 +63,10 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
             row = {
                 "data_name": data_dir,
                 "lambda_fuse": float(lambda_str),
+                "lambda_fuse_effective": result.get("summary", {}).get(
+                    "lambda_fuse_effective",
+                    result.get("history", {}).get("lambda_fuse_effective"),
+                ),
                 "n_samples": result.get("n_samples"),
                 "n_features": result.get("n_features"),
                 "objective_last": result.get("summary", {}).get("objective_last"),
@@ -101,6 +105,10 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
             row["rho"] = config.get("rho")
             row["max_admm_iter"] = config.get("max_admm_iter")
             row["clip_eta"] = config.get("clip_eta")
+            if row["lambda_fuse_effective"] is None and row["n_samples"] is not None:
+                row["lambda_fuse_effective"] = float(row["n_samples"]) * float(
+                    row["lambda_fuse"]
+                )
 
             results.append(row)
 
