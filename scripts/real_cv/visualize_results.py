@@ -104,6 +104,77 @@ def _metric_error(summary_df: pd.DataFrame, metric: str, error: str) -> np.ndarr
     return summary_df[column].to_numpy(dtype=float)
 
 
+def _cox_test_summary(
+    cox_df: pd.DataFrame | None,
+    *,
+    error: str,
+) -> tuple[float, float | None] | None:
+    """Cox CV summary/fold CSV から test c_td の平均と誤差幅を読む。"""
+
+    if cox_df is None or cox_df.empty:
+        return None
+
+    if "c_td_test_cox_mean" in cox_df.columns:
+        mean_values = pd.to_numeric(
+            cox_df["c_td_test_cox_mean"], errors="coerce"
+        ).dropna()
+        if mean_values.empty:
+            return None
+        mean = float(mean_values.iloc[0])
+        err = None
+        error_column = f"c_td_test_cox_{error}"
+        if error != "none" and error_column in cox_df.columns:
+            err_values = pd.to_numeric(cox_df[error_column], errors="coerce").dropna()
+            if not err_values.empty:
+                err = float(err_values.iloc[0])
+        return mean, err
+
+    if "c_td_test_cox" not in cox_df.columns:
+        return None
+    values = pd.to_numeric(cox_df["c_td_test_cox"], errors="coerce").dropna()
+    if values.empty:
+        return None
+    mean = float(values.mean())
+    if values.shape[0] <= 1 or error == "none":
+        return mean, None
+    std = float(values.std(ddof=1))
+    err = std if error == "std" else std / math.sqrt(values.shape[0])
+    return mean, err
+
+
+def _add_cox_test_reference(
+    ax: plt.Axes,
+    cox_df: pd.DataFrame | None,
+    *,
+    error: str,
+) -> None:
+    """現在の軸に Cox test c_td の基準線を重ねる。"""
+
+    summary = _cox_test_summary(cox_df, error=error)
+    if summary is None:
+        return
+
+    mean, se = summary
+    label = f"Cox test c_td = {mean:.3f}"
+    ax.axhline(
+        mean,
+        color="#111827",
+        linestyle=":",
+        linewidth=2.0,
+        label=label,
+        zorder=1,
+    )
+    if error != "none" and se is not None and np.isfinite(se):
+        ax.axhspan(
+            mean - se,
+            mean + se,
+            color="#111827",
+            alpha=0.08,
+            label=f"Cox +/- {error}",
+            zorder=0,
+        )
+
+
 def _set_lambda_axis(ax: plt.Axes, lambdas: pd.Series | np.ndarray) -> None:
     values = np.asarray(lambdas, dtype=float)
     if np.all(values > 0):
@@ -128,6 +199,7 @@ def plot_lambda_vs_c_td(
     summary_df: pd.DataFrame,
     output_dir: Path,
     *,
+    cox_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
 ) -> Path:
@@ -161,6 +233,7 @@ def plot_lambda_vs_c_td(
         capsize=4,
         label=f"mean +/- {error}" if error != "none" else "mean",
     )
+    _add_cox_test_reference(ax, cox_df, error=error)
 
     best_idx = valid_summary["c_td_test_mean"].idxmax()
     best_lambda = float(valid_summary.loc[best_idx, "lambda_fuse"])
@@ -191,6 +264,7 @@ def plot_train_test_c_td(
     summary_df: pd.DataFrame,
     output_dir: Path,
     *,
+    cox_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
 ) -> Path:
@@ -225,6 +299,7 @@ def plot_train_test_c_td(
         capsize=4,
         label=f"test mean +/- {error}" if error != "none" else "test mean",
     )
+    _add_cox_test_reference(ax, cox_df, error=error)
 
     _set_lambda_axis(ax, lambdas)
     ax.set_ylabel("c_td")
@@ -243,6 +318,7 @@ def plot_fold_spaghetti(
     summary_df: pd.DataFrame,
     output_dir: Path,
     *,
+    cox_df: pd.DataFrame | None = None,
     dpi: int = 150,
 ) -> Path:
     """fold ごとの test c_td 軌跡と平均線を描く。"""
@@ -274,6 +350,7 @@ def plot_fold_spaghetti(
         linewidth=2.6,
         label="mean",
     )
+    _add_cox_test_reference(ax, cox_df, error="none")
 
     _set_lambda_axis(ax, lambdas)
     ax.set_ylabel("test c_td")
@@ -473,6 +550,7 @@ def create_all_plots(
     summary_df: pd.DataFrame,
     output_dir: Path,
     *,
+    cox_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
 ) -> list[Path]:
@@ -480,9 +558,13 @@ def create_all_plots(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     return [
-        plot_lambda_vs_c_td(fold_df, summary_df, output_dir, error=error, dpi=dpi),
-        plot_train_test_c_td(summary_df, output_dir, error=error, dpi=dpi),
-        plot_fold_spaghetti(fold_df, summary_df, output_dir, dpi=dpi),
+        plot_lambda_vs_c_td(
+            fold_df, summary_df, output_dir, cox_df=cox_df, error=error, dpi=dpi
+        ),
+        plot_train_test_c_td(
+            summary_df, output_dir, cox_df=cox_df, error=error, dpi=dpi
+        ),
+        plot_fold_spaghetti(fold_df, summary_df, output_dir, cox_df=cox_df, dpi=dpi),
         plot_convergence_diagnostics(
             fold_df, summary_df, output_dir, error=error, dpi=dpi
         ),
@@ -516,6 +598,15 @@ def main() -> None:
         help="Directory for PNG plots. Defaults to <base-dir>/plots.",
     )
     parser.add_argument(
+        "--cox-summary",
+        type=Path,
+        default=None,
+        help=(
+            "Optional Cox CV CSV. Accepts either cox_summary.csv "
+            "or cox_fold_results.csv from compute_cox_baseline.py."
+        ),
+    )
+    parser.add_argument(
         "--error",
         choices=["se", "std", "none"],
         default="se",
@@ -544,10 +635,12 @@ def main() -> None:
         print(f"Saved fold results to: {fold_output}")
         print(f"Saved lambda summary to: {summary_output}")
 
+    cox_df = pd.read_csv(args.cox_summary) if args.cox_summary is not None else None
     outputs = create_all_plots(
         fold_df,
         summary_df,
         output_dir,
+        cox_df=cox_df,
         error=args.error,
         dpi=args.dpi,
     )

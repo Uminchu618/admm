@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from scripts.real_cv.visualize_results import (
     create_all_plots,
     load_or_collect_cv_results,
@@ -66,6 +68,36 @@ def test_real_cv_visualize_results_creates_tables_and_pngs(tmp_path: Path) -> No
         "cv_convergence_diagnostics.png",
     }
     assert {path.name for path in outputs} == expected_names
+    for output in outputs:
+        assert output.exists()
+        assert output.stat().st_size > 0
+
+
+def test_real_cv_visualize_results_accepts_cox_summary(tmp_path: Path) -> None:
+    base_dir = tmp_path / "cv"
+    for lambda_fuse, offset in [(0.1, 0.0), (1.0, 0.02)]:
+        _write_result(base_dir, lambda_fuse, 0, 0.61 + offset, 0.66 + offset)
+        _write_result(base_dir, lambda_fuse, 1, 0.63 + offset, 0.67 + offset)
+
+    fold_df, summary_df = load_or_collect_cv_results(base_dir)
+    cox_df = pd.DataFrame(
+        {
+            "dataset": ["support2"],
+            "n_folds": [2],
+            "c_td_test_cox_mean": [0.625],
+            "c_td_test_cox_se": [0.004],
+        }
+    )
+
+    output_dir = tmp_path / "plots_with_cox"
+    outputs = create_all_plots(fold_df, summary_df, output_dir, cox_df=cox_df)
+
+    assert {path.name for path in outputs} == {
+        "cv_lambda_vs_c_td.png",
+        "cv_train_test_c_td.png",
+        "cv_fold_spaghetti.png",
+        "cv_convergence_diagnostics.png",
+    }
     for output in outputs:
         assert output.exists()
         assert output.stat().st_size > 0

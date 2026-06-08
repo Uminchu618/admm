@@ -69,6 +69,17 @@ uv run scripts/real_cv/visualize_results.py \
   --base-dir outputs/real_cv/support2/support2_5fold_seed1234
 ```
 
+同じ fold 分割で CoxPH baseline も重ねる場合:
+
+```bash
+uv run scripts/real_cv/compute_cox_baseline.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234
+
+uv run scripts/real_cv/visualize_results.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234 \
+  --cox-summary outputs/real_cv/support2/support2_5fold_seed1234/cox_summary.csv
+```
+
 既定では `fold_results.csv`、`summary_by_lambda.csv` と、次の図を
 `outputs/real_cv/support2/support2_5fold_seed1234/plots/` に保存する。
 
