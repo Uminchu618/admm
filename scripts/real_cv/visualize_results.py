@@ -390,8 +390,8 @@ def plot_train_test_c_td(
         capsize=4,
         label=f"test mean +/- {error}" if error != "none" else "test mean",
     )
-    _add_cox_test_reference(ax, cox_df, error=error)
-    _add_aft_test_references(ax, aft_df, error=error)
+    _add_cox_test_reference(ax, cox_df, error="none")
+    _add_aft_test_references(ax, aft_df, error="none")
 
     _set_lambda_axis(ax, lambdas)
     ax.set_ylabel("c_td")
@@ -650,6 +650,15 @@ def plot_model_comparison(
         xerr = pd.to_numeric(valid["c_td_test_error"], errors="coerce").to_numpy(
             dtype=float
         )
+    centers = valid["c_td_test_mean"].to_numpy(dtype=float)
+    if xerr is not None:
+        finite_error = np.where(np.isfinite(xerr), xerr, 0.0)
+    else:
+        finite_error = np.zeros_like(centers)
+    x_min = float(np.min(centers - finite_error))
+    x_max = float(np.max(centers + finite_error))
+    span = max(x_max - x_min, 0.02)
+    padding = max(span * 0.25, 0.005)
 
     fig, ax = plt.subplots(figsize=(9.0, max(4.0, 0.55 * len(valid) + 1.8)))
     ax.barh(
@@ -663,7 +672,7 @@ def plot_model_comparison(
     ax.set_xlabel("test c_td")
     ax.set_title("Model comparison by CV test c_td")
     ax.grid(True, axis="x", alpha=0.3)
-    ax.set_xlim(left=max(0.0, float(valid["c_td_test_mean"].min()) - 0.08), right=1.0)
+    ax.set_xlim(left=max(0.0, x_min - padding), right=min(1.0, x_max + padding))
     fig.tight_layout()
 
     output_path = output_dir / "cv_model_comparison.png"
