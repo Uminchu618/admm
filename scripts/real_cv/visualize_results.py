@@ -175,6 +175,94 @@ def _add_cox_test_reference(
         )
 
 
+def _aft_test_summaries(
+    aft_df: pd.DataFrame | None,
+    *,
+    error: str,
+) -> list[tuple[str, float, float | None]]:
+    """AFT CV summary/fold CSV から model 別 test c_td 平均と誤差幅を読む。"""
+
+    if aft_df is None or aft_df.empty:
+        return []
+
+    model_column = "aft_model" if "aft_model" in aft_df.columns else None
+    if "c_td_test_aft_mean" in aft_df.columns:
+        rows = []
+        for idx, row in aft_df.iterrows():
+            mean = pd.to_numeric(
+                pd.Series([row.get("c_td_test_aft_mean")]), errors="coerce"
+            ).iloc[0]
+            if pd.isna(mean):
+                continue
+            err = None
+            error_column = f"c_td_test_aft_{error}"
+            if error != "none" and error_column in aft_df.columns:
+                err_value = pd.to_numeric(
+                    pd.Series([row.get(error_column)]), errors="coerce"
+                ).iloc[0]
+                if pd.notna(err_value):
+                    err = float(err_value)
+            label = str(row.get(model_column, f"AFT {idx + 1}")) if model_column else "AFT"
+            rows.append((label, float(mean), err))
+        return rows
+
+    if "c_td_test_aft" not in aft_df.columns:
+        return []
+
+    grouped = (
+        aft_df.groupby(model_column, dropna=False)
+        if model_column is not None
+        else [(None, aft_df)]
+    )
+    rows = []
+    for model, subset in grouped:
+        values = pd.to_numeric(subset["c_td_test_aft"], errors="coerce").dropna()
+        if values.empty:
+            continue
+        mean = float(values.mean())
+        err = None
+        if values.shape[0] > 1 and error != "none":
+            std = float(values.std(ddof=1))
+            err = std if error == "std" else std / math.sqrt(values.shape[0])
+        label = "AFT" if model is None or pd.isna(model) else str(model)
+        rows.append((label, mean, err))
+    return rows
+
+
+def _add_aft_test_references(
+    ax: plt.Axes,
+    aft_df: pd.DataFrame | None,
+    *,
+    error: str,
+) -> None:
+    """現在の軸に AFT test c_td の基準線を重ねる。"""
+
+    summaries = _aft_test_summaries(aft_df, error=error)
+    if not summaries:
+        return
+
+    colors = ["#8c564b", "#9467bd", "#e377c2", "#17becf", "#bcbd22"]
+    for idx, (model, mean, err) in enumerate(summaries):
+        color = colors[idx % len(colors)]
+        ax.axhline(
+            mean,
+            color=color,
+            linestyle="-.",
+            linewidth=1.8,
+            label=f"{model} AFT test c_td = {mean:.3f}",
+            zorder=1,
+        )
+        if error != "none" and err is not None and np.isfinite(err):
+            ax.axhspan(
+                mean - err,
+                mean + err,
+                color=color,
+                alpha=0.06,
+                label=f"{model} AFT +/- {error}",
+                zorder=0,
+            )
+
+
 def _set_lambda_axis(ax: plt.Axes, lambdas: pd.Series | np.ndarray) -> None:
     values = np.asarray(lambdas, dtype=float)
     if np.all(values > 0):
@@ -200,6 +288,7 @@ def plot_lambda_vs_c_td(
     output_dir: Path,
     *,
     cox_df: pd.DataFrame | None = None,
+    aft_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
 ) -> Path:
@@ -234,6 +323,7 @@ def plot_lambda_vs_c_td(
         label=f"mean +/- {error}" if error != "none" else "mean",
     )
     _add_cox_test_reference(ax, cox_df, error=error)
+    _add_aft_test_references(ax, aft_df, error=error)
 
     best_idx = valid_summary["c_td_test_mean"].idxmax()
     best_lambda = float(valid_summary.loc[best_idx, "lambda_fuse"])
@@ -265,6 +355,7 @@ def plot_train_test_c_td(
     output_dir: Path,
     *,
     cox_df: pd.DataFrame | None = None,
+    aft_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
 ) -> Path:
@@ -300,6 +391,7 @@ def plot_train_test_c_td(
         label=f"test mean +/- {error}" if error != "none" else "test mean",
     )
     _add_cox_test_reference(ax, cox_df, error=error)
+    _add_aft_test_references(ax, aft_df, error=error)
 
     _set_lambda_axis(ax, lambdas)
     ax.set_ylabel("c_td")
@@ -319,6 +411,7 @@ def plot_fold_spaghetti(
     output_dir: Path,
     *,
     cox_df: pd.DataFrame | None = None,
+    aft_df: pd.DataFrame | None = None,
     dpi: int = 150,
 ) -> Path:
     """fold ごとの test c_td 軌跡と平均線を描く。"""
@@ -351,6 +444,7 @@ def plot_fold_spaghetti(
         label="mean",
     )
     _add_cox_test_reference(ax, cox_df, error="none")
+    _add_aft_test_references(ax, aft_df, error="none")
 
     _set_lambda_axis(ax, lambdas)
     ax.set_ylabel("test c_td")
@@ -472,6 +566,112 @@ def plot_convergence_diagnostics(
     return output_path
 
 
+def build_model_comparison_table(
+    summary_df: pd.DataFrame,
+    *,
+    cox_df: pd.DataFrame | None = None,
+    aft_df: pd.DataFrame | None = None,
+    error: str = "se",
+) -> pd.DataFrame:
+    """ADMM best、Cox、AFT の test c_td 比較表を作る。"""
+
+    rows: list[dict[str, float | str | None]] = []
+
+    admm = summary_df.dropna(subset=["c_td_test_mean"])
+    if not admm.empty:
+        best = admm.sort_values("c_td_test_mean", ascending=False).iloc[0]
+        err_col = f"c_td_test_{error}"
+        rows.append(
+            {
+                "model": "ADMM best lambda",
+                "model_family": "admm",
+                "lambda_fuse": float(best["lambda_fuse"])
+                if pd.notna(best.get("lambda_fuse"))
+                else None,
+                "c_td_test_mean": float(best["c_td_test_mean"]),
+                "c_td_test_error": float(best[err_col])
+                if error != "none" and err_col in best and pd.notna(best[err_col])
+                else None,
+            }
+        )
+
+    cox_summary = _cox_test_summary(cox_df, error=error)
+    if cox_summary is not None:
+        mean, err = cox_summary
+        rows.append(
+            {
+                "model": "CoxPH",
+                "model_family": "cox",
+                "lambda_fuse": None,
+                "c_td_test_mean": mean,
+                "c_td_test_error": err,
+            }
+        )
+
+    for model, mean, err in _aft_test_summaries(aft_df, error=error):
+        rows.append(
+            {
+                "model": f"{model} AFT",
+                "model_family": "aft",
+                "lambda_fuse": None,
+                "c_td_test_mean": mean,
+                "c_td_test_error": err,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+    return (
+        pd.DataFrame(rows)
+        .sort_values("c_td_test_mean", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def plot_model_comparison(
+    comparison_df: pd.DataFrame,
+    output_dir: Path,
+    *,
+    error: str = "se",
+    dpi: int = 150,
+) -> Path:
+    """model 別の test c_td 平均を横棒グラフで描く。"""
+
+    valid = comparison_df.dropna(subset=["model", "c_td_test_mean"])
+    if valid.empty:
+        raise ValueError("No valid model comparison rows found for plotting.")
+
+    valid = valid.sort_values("c_td_test_mean", ascending=True)
+    colors = valid["model_family"].map(
+        {"admm": "#1f77b4", "cox": "#111827", "aft": "#9467bd"}
+    ).fillna("#6b7280")
+    xerr = None
+    if error != "none" and "c_td_test_error" in valid.columns:
+        xerr = pd.to_numeric(valid["c_td_test_error"], errors="coerce").to_numpy(
+            dtype=float
+        )
+
+    fig, ax = plt.subplots(figsize=(9.0, max(4.0, 0.55 * len(valid) + 1.8)))
+    ax.barh(
+        valid["model"],
+        valid["c_td_test_mean"],
+        xerr=xerr,
+        color=colors,
+        alpha=0.88,
+        capsize=4,
+    )
+    ax.set_xlabel("test c_td")
+    ax.set_title("Model comparison by CV test c_td")
+    ax.grid(True, axis="x", alpha=0.3)
+    ax.set_xlim(left=max(0.0, float(valid["c_td_test_mean"].min()) - 0.08), right=1.0)
+    fig.tight_layout()
+
+    output_path = output_dir / "cv_model_comparison.png"
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
+
+
 def load_or_collect_cv_results(
     base_dir: Path,
     fold_results_path: Path | None = None,
@@ -551,24 +751,46 @@ def create_all_plots(
     output_dir: Path,
     *,
     cox_df: pd.DataFrame | None = None,
+    aft_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
 ) -> list[Path]:
     """1〜4 の CV 可視化をまとめて作成する。"""
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    return [
+    outputs = [
         plot_lambda_vs_c_td(
-            fold_df, summary_df, output_dir, cox_df=cox_df, error=error, dpi=dpi
+            fold_df,
+            summary_df,
+            output_dir,
+            cox_df=cox_df,
+            aft_df=aft_df,
+            error=error,
+            dpi=dpi,
         ),
         plot_train_test_c_td(
-            summary_df, output_dir, cox_df=cox_df, error=error, dpi=dpi
+            summary_df,
+            output_dir,
+            cox_df=cox_df,
+            aft_df=aft_df,
+            error=error,
+            dpi=dpi,
         ),
-        plot_fold_spaghetti(fold_df, summary_df, output_dir, cox_df=cox_df, dpi=dpi),
+        plot_fold_spaghetti(
+            fold_df, summary_df, output_dir, cox_df=cox_df, aft_df=aft_df, dpi=dpi
+        ),
         plot_convergence_diagnostics(
             fold_df, summary_df, output_dir, error=error, dpi=dpi
         ),
     ]
+    comparison_df = build_model_comparison_table(
+        summary_df, cox_df=cox_df, aft_df=aft_df, error=error
+    )
+    if not comparison_df.empty and aft_df is not None:
+        outputs.append(
+            plot_model_comparison(comparison_df, output_dir, error=error, dpi=dpi)
+        )
+    return outputs
 
 
 def main() -> None:
@@ -607,6 +829,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--aft-summary",
+        type=Path,
+        default=None,
+        help=(
+            "Optional AFT CV CSV. Accepts either aft_summary.csv "
+            "or aft_fold_results.csv from compute_aft_baseline.py."
+        ),
+    )
+    parser.add_argument(
         "--error",
         choices=["se", "std", "none"],
         default="se",
@@ -636,11 +867,21 @@ def main() -> None:
         print(f"Saved lambda summary to: {summary_output}")
 
     cox_df = pd.read_csv(args.cox_summary) if args.cox_summary is not None else None
+    aft_df = pd.read_csv(args.aft_summary) if args.aft_summary is not None else None
+    comparison_df = build_model_comparison_table(
+        summary_df, cox_df=cox_df, aft_df=aft_df, error=args.error
+    )
+    if aft_df is not None and not comparison_df.empty and not args.no_write_csv:
+        comparison_output = args.base_dir / "model_comparison.csv"
+        comparison_df.to_csv(comparison_output, index=False, encoding="utf-8")
+        print(f"Saved model comparison to: {comparison_output}")
+
     outputs = create_all_plots(
         fold_df,
         summary_df,
         output_dir,
         cox_df=cox_df,
+        aft_df=aft_df,
         error=args.error,
         dpi=args.dpi,
     )
