@@ -13,7 +13,7 @@ lambda_fuseパラメータを変えながら複数のデータセットで並列
 
 ### 1. Lambda値の管理
 
-- **`lambda_grid.json`**: 実験で使用するlambda値のリスト（対数スケール: 0.01～10の10点）
+- **`lambda_grid.json`**: 実験で使用するlambda値のリスト（0 + 対数スケール: 1～200の10点）
 - **`scripts/generate_lambda_grid.py`**: lambda_grid.jsonを生成するユーティリティ
 
 ### 2. 実験実行スクリプト
