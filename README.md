@@ -55,8 +55,8 @@ Lambda値を変えながら複数のデータセットで並列実験を行い�
 
 ```json
 {
-  "description": "Lambda values for parallel experiments (log scale: 0.01 to 10, 10 points)",
-  "lambda_values": [0.01, 0.0215, 0.0464, 0.1, 0.215, 0.464, 1.0, 2.15, 4.64, 10.0]
+  "description": "Lambda values for parallel experiments (0 + log scale: 1 to 200, 10 points)",
+  "lambda_values": [0.0, 1.0, 1.9392274474868578, 3.760603093086394, 7.29266473721711, 14.142135623730951, 27.424817567620735, 53.18295896944989, 103.1338537721246, 200.0]
 }
 ```
 

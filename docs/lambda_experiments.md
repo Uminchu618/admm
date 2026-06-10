@@ -4,11 +4,16 @@
 
 lambda_fuseパラメータを変えながら複数のデータセットで並列実験を行うフレームワークを実装しました。
 
+`lambda_fuse` は平均損失スケールの正則化強度として扱います。尤度部分は実装上
+サンプル和 `negative log-likelihood` なので、最適化では
+`negative log-likelihood + N * lambda_fuse * ||Dβ||_1` を解きます。
+これは `(1/N) * negative log-likelihood + lambda_fuse * ||Dβ||_1` と同じ解です。
+
 ## 実装したファイル
 
 ### 1. Lambda値の管理
 
-- **`lambda_grid.json`**: 実験で使用するlambda値のリスト（対数スケール: 0.01～10の10点）
+- **`lambda_grid.json`**: 実験で使用するlambda値のリスト（0 + 対数スケール: 1～200の10点）
 - **`scripts/generate_lambda_grid.py`**: lambda_grid.jsonを生成するユーティリティ
 
 ### 2. 実験実行スクリプト
@@ -151,6 +156,7 @@ uv run scripts/visualize_lambda_results.py \
 |------|------|
 | data_name | データファイル名 |
 | lambda_fuse | Lambda値 |
+| lambda_fuse_effective | 最適化で使った実効値（n_samples * lambda_fuse） |
 | n_samples | サンプル数 |
 | n_features | 特徴量数 |
 | objective_last | 最終目的関数値 |

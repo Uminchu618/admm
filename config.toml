@@ -34,6 +34,8 @@ baseline_knot_margin = 1.1
 
 # lambda_fuse:
 #   fused lasso 正則化の強さ（区間間差分 Dβ の L1 ペナルティ）。
+#   尤度はサンプル和として実装しているため、最適化では N * lambda_fuse を使う。
+#   これは (1/N) * negative log-likelihood + lambda_fuse * ||Dβ||_1 と同等。
 #   大きいほど時間方向に "段差の少ない"（変化点の少ない）β になりやすい。
 lambda_fuse = 10.0
 

@@ -50,6 +50,7 @@ class FusedLassoADMMSolver:
         self.objective = objective
 
         # lambda_fuse: fused lasso（差分の L1）正則化の強さ。
+        # 尤度はサンプル和として実装しているため、solve() 内で N 倍して使う。
         self.lambda_fuse = lambda_fuse
 
         # rho: ADMM のペナルティ係数。大きいと primal を重視しやすいが、数値的に硬くなることがある。
@@ -136,6 +137,14 @@ class FusedLassoADMMSolver:
             raise ValueError("delta は 1 次元配列である必要があります。")
         if not (X_array.shape[0] == T_array.shape[0] == delta_array.shape[0]):
             raise ValueError("X, T, delta のサンプル数が一致しません。")
+
+        n_samples = int(X_array.shape[0])
+        lambda_fuse = float(self.lambda_fuse)
+        if lambda_fuse < 0.0:
+            raise ValueError("lambda_fuse は 0 以上である必要があります。")
+        # objective.value は -log L のサンプル和なので O(N)。
+        # (1/N) loss + lambda P と同じ解になるよう、loss + N*lambda P を解く。
+        lambda_fuse_effective = float(n_samples) * lambda_fuse
 
         K, n_beta = beta.shape
         if X_array.shape[1] != K:
@@ -249,7 +258,7 @@ class FusedLassoADMMSolver:
 
         d_beta_init = diff_beta(beta)
         init_obj = safe_base_value(beta, gamma)
-        init_obj += float(self.lambda_fuse * np.sum(np.abs(d_beta_init)))
+        init_obj += float(lambda_fuse_effective * np.sum(np.abs(d_beta_init)))
         best_objective = float(init_obj)
         best_beta = beta.copy()
         best_gamma = gamma.copy()
@@ -499,7 +508,7 @@ class FusedLassoADMMSolver:
             z_prev = z.copy()
             if n_penalized > 0 and diff_len > 0:
                 d_beta = diff_beta(beta)
-                z = soft_threshold(d_beta + u, self.lambda_fuse / self.rho)
+                z = soft_threshold(d_beta + u, lambda_fuse_effective / self.rho)
                 u = u + d_beta - z
             else:
                 d_beta = diff_beta(beta)
@@ -526,7 +535,7 @@ class FusedLassoADMMSolver:
 
             # 履歴を記録（目的関数は最小化対象として扱う）
             base_value = safe_base_value(beta, gamma)
-            penalty = float(self.lambda_fuse * np.sum(np.abs(d_beta)))
+            penalty = float(lambda_fuse_effective * np.sum(np.abs(d_beta)))
             total_objective = base_value + penalty
             if (
                 previous_objective is not None
@@ -600,6 +609,9 @@ class FusedLassoADMMSolver:
         history["best_objective"] = (
             float(best_objective) if np.isfinite(best_objective) else None
         )
+        history["lambda_fuse"] = lambda_fuse
+        history["lambda_fuse_scale"] = n_samples
+        history["lambda_fuse_effective"] = lambda_fuse_effective
         history["best_iter"] = int(best_iter) if best_iter >= 0 else None
         history["used_best_iterate"] = used_best_iterate
         history["stopped_due_to_invalid"] = bool(stopped_due_to_invalid)
