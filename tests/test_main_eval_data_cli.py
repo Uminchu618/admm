@@ -121,5 +121,7 @@ def test_main_eval_data_cli(tmp_path: Path) -> None:
     assert payload["eval_data_path"] == str(test_path)
     assert payload["n_samples"] == X_train.shape[0]
     assert payload["n_eval_samples"] == X_test.shape[0]
+    assert payload["summary"]["lambda_fuse_scale"] == X_train.shape[0]
+    assert payload["summary"]["lambda_fuse_effective"] == 0.1 * X_train.shape[0]
     assert payload["summary"]["c_td_train"] is not None
     assert payload["summary"]["c_td_test"] is not None
