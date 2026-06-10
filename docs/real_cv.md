@@ -82,6 +82,22 @@ uv run scripts/real_cv/visualize_results.py \
   --cox-summary outputs/real_cv/support2/support2_5fold_seed1234/cox_summary.csv
 ```
 
+同じ fold 分割で単純な parametric AFT baseline も比較する場合:
+
+```bash
+uv run scripts/real_cv/compute_aft_baseline.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234
+
+uv run scripts/real_cv/visualize_results.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234 \
+  --cox-summary outputs/real_cv/support2/support2_5fold_seed1234/cox_summary.csv \
+  --aft-summary outputs/real_cv/support2/support2_5fold_seed1234/aft_summary.csv
+```
+
+既定では `WeibullAFTFitter`, `LogNormalAFTFitter`, `LogLogisticAFTFitter`
+を fold ごとに推定し、`aft_fold_results.csv` と `aft_summary.csv` を保存する。
+`--aft-models weibull` のように model を絞ることもできる。
+
 既定では `fold_results.csv`、`summary_by_lambda.csv` と、次の図を
 `outputs/real_cv/support2/support2_5fold_seed1234/plots/` に保存する。
 
@@ -89,6 +105,7 @@ uv run scripts/real_cv/visualize_results.py \
 - `cv_train_test_c_td.png`: train/test `c_td` 平均の比較
 - `cv_fold_spaghetti.png`: fold 別 test `c_td` の lambda 軌跡
 - `cv_convergence_diagnostics.png`: ADMM iteration、残差、停止理由
+- `cv_model_comparison.png`: `--aft-summary` 指定時の ADMM/Cox/AFT 比較
 
 ローカルで 1 task だけ確認する場合:
 

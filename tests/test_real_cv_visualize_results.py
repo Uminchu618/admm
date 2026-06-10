@@ -101,3 +101,35 @@ def test_real_cv_visualize_results_accepts_cox_summary(tmp_path: Path) -> None:
     for output in outputs:
         assert output.exists()
         assert output.stat().st_size > 0
+
+
+def test_real_cv_visualize_results_accepts_aft_summary(tmp_path: Path) -> None:
+    base_dir = tmp_path / "cv"
+    for lambda_fuse, offset in [(0.1, 0.0), (1.0, 0.02)]:
+        _write_result(base_dir, lambda_fuse, 0, 0.61 + offset, 0.66 + offset)
+        _write_result(base_dir, lambda_fuse, 1, 0.63 + offset, 0.67 + offset)
+
+    fold_df, summary_df = load_or_collect_cv_results(base_dir)
+    aft_df = pd.DataFrame(
+        {
+            "dataset": ["support2", "support2"],
+            "aft_model": ["weibull", "log_normal"],
+            "n_folds": [2, 2],
+            "c_td_test_aft_mean": [0.622, 0.618],
+            "c_td_test_aft_se": [0.005, 0.006],
+        }
+    )
+
+    output_dir = tmp_path / "plots_with_aft"
+    outputs = create_all_plots(fold_df, summary_df, output_dir, aft_df=aft_df)
+
+    assert {path.name for path in outputs} == {
+        "cv_lambda_vs_c_td.png",
+        "cv_train_test_c_td.png",
+        "cv_fold_spaghetti.png",
+        "cv_convergence_diagnostics.png",
+        "cv_model_comparison.png",
+    }
+    for output in outputs:
+        assert output.exists()
+        assert output.stat().st_size > 0
