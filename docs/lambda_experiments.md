@@ -13,7 +13,7 @@ lambda_fuseパラメータを変えながら複数のデータセットで並列
 
 ### 1. Lambda値の管理
 
-- **`lambda_grid.json`**: 実験で使用するlambda値のリスト（0 + 対数スケール: 1～200の10点）
+- **`lambda_grid.json`**: 実験で使用するlambda値のリスト（0 + 対数スケール: 1～10の合計10点）
 - **`scripts/generate_lambda_grid.py`**: lambda_grid.jsonを生成するユーティリティ
 
 ### 2. 実験実行スクリプト
@@ -60,21 +60,21 @@ lambda_idx = task_idx % n_lambda
 
 | SGE_TASK_ID | データインデックス | Lambdaインデックス | データ名 | Lambda値 |
 |-------------|-------------------|-------------------|---------|---------|
-| 1 | 0 | 0 | data_0001.csv | 0.01 |
-| 2 | 0 | 1 | data_0001.csv | 0.0215 |
+| 1 | 0 | 0 | data_0001.csv | 0.0 |
+| 2 | 0 | 1 | data_0001.csv | 1.0 |
 | 10 | 0 | 9 | data_0001.csv | 10.0 |
-| 11 | 1 | 0 | data_0002.csv | 0.01 |
-| 101 | 10 | 0 | data_0011.csv | 0.01 |
+| 11 | 1 | 0 | data_0002.csv | 0.0 |
+| 101 | 10 | 0 | data_0011.csv | 0.0 |
 
 ## ディレクトリ構造
 
 ```
 outputs/lambda_experiments/
 ├── data_0001/
-│   ├── lambda_0.01/
-│   │   ├── config.toml      # lambda_fuse=0.01で上書きしたconfig
+│   ├── lambda_0/
+│   │   ├── config.toml      # lambda_fuse=0.0で上書きしたconfig
 │   │   └── result.json      # 実験結果
-│   ├── lambda_0.0215/
+│   ├── lambda_1/
 │   │   ├── config.toml
 │   │   └── result.json
 │   └── ...
@@ -88,7 +88,7 @@ outputs/lambda_experiments/
 ### 1. Lambda値の準備
 
 ```bash
-# デフォルト設定で生成（0.01～10の対数10点）
+# デフォルト設定で生成（0 + 1～10の対数9点、合計10点）
 python scripts/generate_lambda_grid.py
 
 # カスタム設定

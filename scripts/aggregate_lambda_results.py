@@ -55,7 +55,7 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
             lambda_dir = result_path.parent.name  # lambda_{value}
             data_dir = result_path.parent.parent.name
 
-            # lambda値を抽出（lambda_0.01 → 0.01）
+            # lambda値を抽出（lambda_1.33352143216 → 1.33352143216）
             lambda_str = lambda_dir.replace("lambda_", "")
 
             z_last = result.get("z_last")
