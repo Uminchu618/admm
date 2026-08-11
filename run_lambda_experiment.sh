@@ -90,6 +90,11 @@ sed -i.bak "s/^lambda_fuse = .*/lambda_fuse = $selected_lambda/" "$temp_config"
 
 output_json="$output_dir/result.json"
 
+if [ "${SKIP_EXISTING:-0}" = "1" ] && [ -f "$output_json" ]; then
+	echo "Skip existing result: $output_json"
+	exit 0
+fi
+
 cd "$repo_root"
 "$uv_bin" run main.py \
 	--config "$temp_config" \
