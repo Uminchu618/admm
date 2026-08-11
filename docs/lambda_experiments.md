@@ -20,6 +20,7 @@ lambda_fuseパラメータを変えながら複数のデータセットで並列
 
 - **`run_lambda_experiment.sh`**: SGE_TASK_IDに基づいて実験を実行
   - データファイルとlambda値の組み合わせを自動選択
+  - 同名の独立評価データを `--eval-data` で指定
   - 各実験用の一時configを生成（lambda_fuseを上書き）
   - 結果を構造化されたディレクトリに保存
 
@@ -84,6 +85,18 @@ outputs/lambda_experiments/
 ```
 
 ## 使い方
+
+### 0. 学習・独立評価データの生成
+
+```bash
+uv run generation/generate_extended_aft_step_datasets.py \
+  --output-dir data/extended_aft_step \
+  --eval-output-dir data/extended_aft_step_eval
+```
+
+両ディレクトリには同名のCSVが作られ、評価データには既定で
+`train seed + 100000` を使います。対応する評価CSVがない場合、
+`run_lambda_experiment.sh` は学習時評価へフォールバックせずエラー終了します。
 
 ### 1. Lambda値の準備
 
@@ -158,10 +171,17 @@ uv run scripts/visualize_lambda_results.py \
 | lambda_fuse | Lambda値 |
 | lambda_fuse_effective | 最適化で使った実効値（n_samples * lambda_fuse） |
 | n_samples | サンプル数 |
+| n_eval_samples | 独立評価データのサンプル数 |
 | n_features | 特徴量数 |
 | objective_last | 最終目的関数値 |
 | primal_residual_last | 最終primal残差 |
 | dual_residual_last | 最終dual残差 |
+| c_td | 独立評価データ上の time-dependent C-index |
+| c_td_train | 学習データ上の time-dependent C-index |
+| c_td_test | 独立評価データ上の time-dependent C-index |
+| n_change_points | `z_last` の非ゼロ要素数 |
+| n_params | `n_baseline_basis + n_features + n_change_points` |
+| bic | `2 * NLL + n_params * log(n_samples)` |
 | rho | ADMMペナルティ係数 |
 | max_admm_iter | ADMM最大反復数 |
 | clip_eta | exp(η)クリップ幅 |

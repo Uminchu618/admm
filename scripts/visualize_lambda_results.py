@@ -307,7 +307,14 @@ def compute_true_beta(time_points: np.ndarray, config_path: Path) -> np.ndarray:
 
     if "stepwise_beta" in cfg:
         step_cfg = cfg["stepwise_beta"]
-        time_grid = np.asarray(step_cfg["time_grid"], dtype=float)
+        time_grid_raw = step_cfg.get(
+            "true_time_grid", step_cfg.get("time_grid")
+        )
+        if time_grid_raw is None:
+            raise ValueError(
+                "stepwise_beta.true_time_grid (or legacy time_grid) is required"
+            )
+        time_grid = np.asarray(time_grid_raw, dtype=float)
 
         def piecewise_beta(levels: list[float]) -> np.ndarray:
             idx = np.searchsorted(time_grid[1:], time_points, side="right")

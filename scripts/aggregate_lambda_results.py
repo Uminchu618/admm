@@ -11,27 +11,26 @@
 
 import argparse
 import json
-import math
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from admm.model_selection import (
+    compute_bic,
+    count_change_points,
+    effective_degrees_of_freedom,
+)
+
 
 def count_nonzero_z(z_last: Any, tol: float) -> Optional[int]:
-    """z_lastのうち|z|>tolの要素数を数える"""
-    if z_last is None:
-        return None
+    """後方互換用: z_last の非ゼロ差分数を返す。"""
 
-    try:
-        total = 0
-        for row in z_last:
-            for value in row:
-                if abs(float(value)) > tol:
-                    total += 1
-        return total
-    except (TypeError, ValueError):
-        return None
+    return count_change_points(z_last, tol)
 
 
 def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
@@ -59,6 +58,16 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
             lambda_str = lambda_dir.replace("lambda_", "")
 
             z_last = result.get("z_last")
+            summary = result.get("summary", {})
+            config = result.get("config", {})
+            n_features = result.get("n_features")
+            n_change_points = count_change_points(z_last, z_tol)
+            n_params = effective_degrees_of_freedom(
+                n_baseline_basis=config.get("n_baseline_basis"),
+                n_features=n_features,
+                z=z_last,
+                z_tol=z_tol,
+            )
 
             row = {
                 "data_name": data_dir,
@@ -68,40 +77,32 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
                     result.get("history", {}).get("lambda_fuse_effective"),
                 ),
                 "n_samples": result.get("n_samples"),
-                "n_features": result.get("n_features"),
-                "objective_last": result.get("summary", {}).get("objective_last"),
-                "neg_loglik_last": result.get("summary", {}).get("neg_loglik_last"),
-                "primal_residual_last": result.get("summary", {}).get(
-                    "primal_residual_last"
-                ),
-                "dual_residual_last": result.get("summary", {}).get(
-                    "dual_residual_last"
-                ),
-                "c_td": result.get("summary", {}).get("c_td"),
-                "n_params": count_nonzero_z(z_last, z_tol),
+                "n_eval_samples": result.get("n_eval_samples"),
+                "n_features": n_features,
+                "objective_last": summary.get("objective_last"),
+                "neg_loglik_last": summary.get("neg_loglik_last"),
+                "primal_residual_last": summary.get("primal_residual_last"),
+                "dual_residual_last": summary.get("dual_residual_last"),
+                "c_td": summary.get("c_td"),
+                "c_td_train": summary.get("c_td_train"),
+                "c_td_test": summary.get("c_td_test"),
+                "n_change_points": n_change_points,
+                "n_params": n_params,
                 "result_path": str(result_path.relative_to(base_dir.parent.parent)),
             }
 
-            loglik = row["neg_loglik_last"]
-            if loglik is not None:
-                loglik = -float(loglik)
-
-            if loglik is None and row["objective_last"] is not None:
-                loglik = -float(row["objective_last"])
-
-            if (
-                loglik is not None
-                and row["n_params"] is not None
-                and row["n_samples"] is not None
-            ):
-                row["bic"] = -2.0 * loglik + float(row["n_params"]) * math.log(
-                    float(row["n_samples"])
-                )
-            else:
-                row["bic"] = None
+            neg_loglik = row["neg_loglik_last"]
+            if neg_loglik is None:
+                # 古い result.json との互換用。penalty を含む可能性があるため、
+                # 新しい結果では必ず neg_loglik_last を使用する。
+                neg_loglik = row["objective_last"]
+            row["bic"] = compute_bic(
+                neg_loglik=neg_loglik,
+                n_samples=row["n_samples"],
+                degrees_of_freedom=row["n_params"],
+            )
 
             # configから主要なハイパーパラメータも記録
-            config = result.get("config", {})
             row["rho"] = config.get("rho")
             row["max_admm_iter"] = config.get("max_admm_iter")
             row["clip_eta"] = config.get("clip_eta")
@@ -184,6 +185,7 @@ def main() -> None:
                 "lambda_fuse",
                 "objective_last",
                 "primal_residual_last",
+                "n_change_points",
                 "n_params",
             ]
         ].head(5)

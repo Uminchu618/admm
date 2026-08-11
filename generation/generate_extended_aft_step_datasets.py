@@ -12,6 +12,18 @@ if str(REPO_ROOT) not in sys.path:
 from generation.extended_aft_step_generator import build_generator, load_config
 
 
+def _write_dataset(generator, output_path: Path) -> None:
+    """生成データと、その解析・真値グリッドのメタデータを保存する。"""
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    generator.simulate().to_csv(output_path, index=False)
+    meta_path = output_path.with_suffix(output_path.suffix + ".meta.json")
+    meta_path.write_text(
+        json.dumps(generator.metadata(), indent=2),
+        encoding="utf-8",
+    )
+
+
 def generate_datasets(
     cfg: Dict,
     output_dir: Path,
@@ -20,6 +32,9 @@ def generate_datasets(
     prefix: str,
     overwrite: bool,
     baseline_alpha: float | None,
+    eval_output_dir: Path | None = None,
+    eval_seed_offset: int = 100_000,
+    eval_n: int | None = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -32,21 +47,24 @@ def generate_datasets(
         cfg_seed = copy.deepcopy(cfg)
         cfg_seed["seed"] = seed
 
-        generator = build_generator(cfg_seed)
-        df = generator.simulate()
-
         output_path = output_dir / f"{prefix}{seed}.csv"
         if output_path.exists() and not overwrite:
             print(f"skip: {output_path}")
-            continue
+        else:
+            _write_dataset(build_generator(cfg_seed), output_path)
+            print(f"saved: {output_path}")
 
-        df.to_csv(output_path, index=False)
-        meta_path = output_path.with_suffix(output_path.suffix + ".meta.json")
-        meta_path.write_text(
-            json.dumps({"time_grid": generator.step_params.time_grid}, indent=2),
-            encoding="utf-8",
-        )
-        print(f"saved: {output_path}")
+        if eval_output_dir is not None:
+            eval_cfg = copy.deepcopy(cfg_seed)
+            eval_cfg["seed"] = seed + eval_seed_offset
+            if eval_n is not None:
+                eval_cfg["n"] = eval_n
+            eval_output_path = eval_output_dir / f"{prefix}{seed}.csv"
+            if eval_output_path.exists() and not overwrite:
+                print(f"skip: {eval_output_path}")
+            else:
+                _write_dataset(build_generator(eval_cfg), eval_output_path)
+                print(f"saved: {eval_output_path}")
 
 
 def main() -> None:
@@ -94,6 +112,29 @@ def main() -> None:
         default=None,
         help="baseline.alpha を上書きする値（未指定なら設定ファイル値）",
     )
+    parser.add_argument(
+        "--eval-output-dir",
+        type=Path,
+        default=Path("data/extended_aft_step_eval"),
+        help="独立評価データの出力先。--skip-eval 指定時は使用しない。",
+    )
+    parser.add_argument(
+        "--eval-seed-offset",
+        type=int,
+        default=100_000,
+        help="評価データのseedに加える値。",
+    )
+    parser.add_argument(
+        "--eval-n",
+        type=int,
+        default=None,
+        help="評価データの標本サイズ（未指定なら学習データと同じ）。",
+    )
+    parser.add_argument(
+        "--skip-eval",
+        action="store_true",
+        help="独立評価データを生成しない。",
+    )
 
     args = parser.parse_args()
 
@@ -106,6 +147,9 @@ def main() -> None:
         prefix=args.prefix,
         overwrite=args.overwrite,
         baseline_alpha=args.baseline_alpha,
+        eval_output_dir=None if args.skip_eval else args.eval_output_dir,
+        eval_seed_offset=args.eval_seed_offset,
+        eval_n=args.eval_n,
     )
 
 
