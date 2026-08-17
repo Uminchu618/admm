@@ -44,6 +44,17 @@ lambda_fuse = 10.0
 #   primal/dual のバランスに影響し、収束速度・安定性が変わり得る。
 rho = 1.0
 
+# adaptive_rho:
+#   primal/dual residual の偏りに応じて rho を更新する。
+#   既存実験の再現性のため標準configでは無効。診断実験では有効化する。
+adaptive_rho = false
+rho_balance_mu = 10.0
+rho_increase_factor = 2.0
+rho_decrease_factor = 2.0
+rho_update_interval = 10
+rho_min = 1e-6
+rho_max = 1e6
+
 # max_admm_iter:
 #   ADMM 反復の最大回数。
 #   実行確認用に小さめにしている（本番は必要に応じて増やす）。

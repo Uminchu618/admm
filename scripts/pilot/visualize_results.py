@@ -98,12 +98,34 @@ def aggregate_lambda(data: pd.DataFrame) -> pd.DataFrame:
 
 
 def select_by_bic(data: pd.DataFrame) -> pd.DataFrame:
-    selected = data.loc[data.groupby("data_name")["bic"].idxmin()].copy()
+    eligible = data.dropna(subset=["bic"]).copy()
+    if "bic_eligible" in eligible.columns:
+        eligible = eligible.loc[eligible["bic_eligible"].fillna(False)]
+    if eligible.empty:
+        return data.iloc[0:0].copy()
+    selected = eligible.loc[eligible.groupby("data_name")["bic"].idxmin()].copy()
     selected["scenario"] = selected["scenario"].astype(str)
     return selected.sort_values(["scenario", "seed"])
 
 
 def aggregate_selected(selected: pd.DataFrame) -> pd.DataFrame:
+    if selected.empty:
+        return pd.DataFrame(
+            columns=[
+                "scenario",
+                "n",
+                "lambda_mean",
+                "lambda_median",
+                "lambda_zero_rate",
+                "c_td_test_mean",
+                "c_td_test_sd",
+                "c_td_gap_mean",
+                "change_points_mean",
+                "change_points_sd",
+                "primal_residual_median",
+                "residual_screen_pass_rate",
+            ]
+        )
     result = selected.groupby("scenario").agg(
         n=("seed", "count"),
         lambda_mean=("lambda_fuse", "mean"),
@@ -270,6 +292,21 @@ def plot_bic_diagnostics(
     output_path: Path,
     residual_threshold: float,
 ) -> None:
+    if selected.empty:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.axis("off")
+        ax.text(
+            0.5,
+            0.5,
+            "No formally converged BIC-eligible fits",
+            ha="center",
+            va="center",
+            fontsize=16,
+        )
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        return
+
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     rng = np.random.default_rng(20260818)
 
@@ -381,6 +418,14 @@ def write_report(
         "| Scenario | n | Median lambda | Mean test Ctd | Mean change points | Median primal residual | Screen pass rate |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
+    if selected.empty:
+        lines.extend(
+            [
+                "| — | 0 | — | — | — | — | — |",
+                "",
+                "No dataset had a formally converged BIC-eligible candidate.",
+            ]
+        )
     for row in selected_summary.itertuples(index=False):
         lines.append(
             f"| {SCENARIO_LABELS[row.scenario]} | {int(row.n)} | "

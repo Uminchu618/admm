@@ -83,11 +83,46 @@ def collect_results(base_dir: Path, z_tol: float = 1e-8) -> pd.DataFrame:
             z=z_last,
             z_tol=z_tol,
         )
+        history = result.get("history", {})
         neg_loglik_last = summary.get("neg_loglik_last")
-        bic = compute_bic(
-            neg_loglik=neg_loglik_last,
-            n_samples=n_samples,
-            degrees_of_freedom=n_params,
+        returned_neg_loglik = summary.get(
+            "returned_neg_loglik", history.get("returned_neg_loglik")
+        )
+        returned_primal_residual = summary.get(
+            "returned_primal_residual", history.get("returned_primal_residual")
+        )
+        returned_dual_residual = summary.get(
+            "returned_dual_residual", history.get("returned_dual_residual")
+        )
+        returned_primal_tolerance = summary.get(
+            "returned_primal_tolerance", history.get("returned_primal_tolerance")
+        )
+        returned_dual_tolerance = summary.get(
+            "returned_dual_tolerance", history.get("returned_dual_tolerance")
+        )
+        converged = bool(summary.get("converged", history.get("converged", False)))
+        residuals_ok = bool(
+            returned_primal_residual is not None
+            and returned_dual_residual is not None
+            and returned_primal_tolerance is not None
+            and returned_dual_tolerance is not None
+            and returned_primal_residual <= returned_primal_tolerance
+            and returned_dual_residual <= returned_dual_tolerance
+        )
+        bic_eligible = bool(
+            summary.get("bic_eligible", history.get("bic_eligible", False))
+            and converged
+            and residuals_ok
+            and returned_neg_loglik is not None
+        )
+        bic = (
+            compute_bic(
+                neg_loglik=returned_neg_loglik,
+                n_samples=n_samples,
+                degrees_of_freedom=n_params,
+            )
+            if bic_eligible
+            else None
         )
 
         rows.append(
@@ -99,10 +134,20 @@ def collect_results(base_dir: Path, z_tol: float = 1e-8) -> pd.DataFrame:
                 "n_features": n_features,
                 "objective_last": summary.get("objective_last"),
                 "neg_loglik_last": neg_loglik_last,
+                "returned_neg_loglik": returned_neg_loglik,
                 "primal_residual_last": summary.get("primal_residual_last"),
                 "dual_residual_last": summary.get("dual_residual_last"),
+                "returned_primal_residual": returned_primal_residual,
+                "returned_dual_residual": returned_dual_residual,
+                "returned_primal_tolerance": returned_primal_tolerance,
+                "returned_dual_tolerance": returned_dual_tolerance,
                 "stopping_reason": summary.get("stopping_reason"),
                 "n_admm_iter": summary.get("n_admm_iter"),
+                "returned_iter": summary.get(
+                    "returned_iter", history.get("returned_iter")
+                ),
+                "converged": converged,
+                "bic_eligible": bic_eligible,
                 "c_td": summary.get("c_td"),
                 "c_td_train": summary.get("c_td_train"),
                 "n_change_points": n_change_points,

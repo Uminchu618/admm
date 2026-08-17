@@ -139,6 +139,10 @@ uv run scripts/aggregate_lambda_results.py \
   --output outputs/lambda_summary.csv
 ```
 
+BIC は、正式な Boyd 型残差判定を満たした `bic_eligible=true` の結果だけで
+計算します。`max_iter`、`stagnated`、`invalid_state` は結果JSONへ残しますが、
+モデル選択候補には含めません。候補がないデータセットではBIC選択不能として扱います。
+
 ### 5. 結果の可視化
 
 ```bash
@@ -174,6 +178,14 @@ uv run scripts/visualize_lambda_results.py \
 | n_eval_samples | 独立評価データのサンプル数 |
 | n_features | 特徴量数 |
 | objective_last | 最終目的関数値 |
+| returned_iter | `coef` と `z_last` が対応する0始まりの反復番号 |
+| returned_neg_loglik | 返却反復の負の対数尤度 |
+| returned_primal_residual | 返却反復のprimal残差 |
+| returned_dual_residual | 返却反復のdual残差 |
+| returned_primal_tolerance | 返却反復のprimal許容誤差 |
+| returned_dual_tolerance | 返却反復のdual許容誤差 |
+| converged | 正式な残差判定を満たしたか |
+| bic_eligible | BIC選択候補として使用できるか |
 | primal_residual_last | 最終primal残差 |
 | dual_residual_last | 最終dual残差 |
 | c_td | 独立評価データ上の time-dependent C-index |
@@ -186,6 +198,31 @@ uv run scripts/visualize_lambda_results.py \
 | max_admm_iter | ADMM最大反復数 |
 | clip_eta | exp(η)クリップ幅 |
 | result_path | 結果JSONの相対パス |
+
+## パイロット診断実験
+
+既存の `outputs/pilot` と分離して、Oracle・Fine-grid各3 seed、small lambda
+9点の54タスクを実行できます。既定設定は適応的rhoと
+`newton_steps_per_admm=5`です。
+
+```bash
+./scripts/pilot/submit_diagnostic.sh
+./scripts/pilot/aggregate_diagnostic.sh
+```
+
+出力先は `outputs/pilot_diagnostic/adaptive_rho_newton5/` です。
+集計後には `check_diagnostic.py` が54件の正式収束、返却残差、BIC候補、
+正則化経路の変化を検査し、不合格なら終了コード1を返します。
+固定rhoやNewtonステップ数を比較するときは、別のrun名を必ず指定して結果を分離します。
+
+```bash
+PILOT_DIAGNOSTIC_RUN=fixed_rho10_newton5 \
+DIAGNOSTIC_RHO=10 \
+DIAGNOSTIC_ADAPTIVE_RHO=false \
+DIAGNOSTIC_NEWTON_STEPS=5 \
+SGE_TASK_ID=1 \
+./scripts/pilot/run_diagnostic_task.sh
+```
 
 ## 設計のポイント
 
