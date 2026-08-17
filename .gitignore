@@ -23,3 +23,5 @@ wheels/
 
 /outputs/real_cv/support2/support2_5fold_seed1234
 /outputs/real_cv/framingham/framingham_5fold_seed1234
+
+/outputs/pilot
