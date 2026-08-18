@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-run_name="${PILOT_DIAGNOSTIC_RUN:-adaptive_rho_normalized_newton5}"
+run_name="${PILOT_DIAGNOSTIC_RUN:-adaptive_rho_normalized_stagnation_escape_newton5}"
 output_dir="${PILOT_DIAGNOSTIC_OUTPUT_DIR:-$repo_root/outputs/pilot_diagnostic/$run_name}"
 summary_path="${PILOT_DIAGNOSTIC_SUMMARY:-$repo_root/outputs/pilot_diagnostic/${run_name}_summary.csv}"
 uv_bin="${UV_BIN:-uv}"

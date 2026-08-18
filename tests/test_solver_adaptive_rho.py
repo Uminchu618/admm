@@ -73,6 +73,7 @@ def test_adaptive_rho_increases_when_primal_dominates() -> None:
     assert history["rho"] == [1.0, 2.0]
     assert history["rho_next"][0] == 2.0
     assert history["rho_update"][0] == "increase"
+    assert history["rho_update_trigger"][0] == "interval"
     assert history["rho_final"] == 2.0
 
 
@@ -104,6 +105,47 @@ def test_rho_change_resets_stagnation_before_stopping() -> None:
     assert history["stagnation_count"][:2] == [0, 0]
     assert history["stopping_reason"] == "residual_converged"
     assert history["n_admm_iter"] == 3
+
+
+def test_stagnation_forces_rho_balance_before_next_periodic_update() -> None:
+    solver = _solver(max_admm_iter=8, adaptive_rho=True)
+    solver.lambda_fuse = 0.0
+    solver.admm_tol_primal = 0.5
+    solver.admm_tol_dual = 0.5
+    solver.admm_stagnation_tol = 1.0
+    solver.admm_stagnation_patience = 1
+    solver.newton_tol = 100.0
+    solver.rho_update_interval = 5
+
+    _, _, _, _, history = solver.solve(*_inputs())
+
+    # 2反復目は通常のrho更新周期ではないが、停滞上限に達したためbalancingを行う。
+    assert history["rho_update"][1] == "decrease"
+    assert history["rho_next"][1] == 0.5
+    assert history["rho_update_trigger"][1] == "stagnation_escape"
+    assert history["stagnation_count"][1] == 0
+    assert history["stopping_reason"] == "residual_converged"
+    assert history["n_admm_iter"] > 2
+
+
+def test_stagnation_stops_when_forced_rho_balance_cannot_change_rho() -> None:
+    solver = _solver(max_admm_iter=5, adaptive_rho=True)
+    solver.admm_tol_primal = 0.5
+    solver.admm_tol_dual = 0.5
+    solver.admm_stagnation_tol = 1.0
+    solver.admm_stagnation_patience = 1
+    solver.newton_tol = 100.0
+    solver.rho_update_interval = 5
+    solver.rho_max = 1.0
+
+    _, _, _, _, history = solver.solve(*_inputs())
+
+    assert history["rho_update"][1] == "none"
+    assert history["rho_next"][1] == 1.0
+    assert history["rho_update_trigger"][1] == "stagnation_escape"
+    assert history["stagnation_count"][1] == 1
+    assert history["stopping_reason"] == "stagnated"
+    assert history["n_admm_iter"] == 2
 
 
 def test_initial_best_is_not_returned_as_estimate() -> None:

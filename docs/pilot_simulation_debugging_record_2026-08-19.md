@@ -620,7 +620,47 @@ adaptive_rho_normalized_newton5
 
 へ変更した。
 
-## 9. 現在の到達点
+## 9. 第2次修正後の54件診断
+
+入力は次である。
+
+- [`adaptive_rho_normalized_newton5_summary.csv`](../outputs/pilot_diagnostic/adaptive_rho_normalized_newton5_summary.csv)
+- [`adaptive_rho_normalized_newton5_gate.json`](../outputs/pilot_diagnostic/adaptive_rho_normalized_newton5_gate.json)
+- 個別の `outputs/pilot_diagnostic/adaptive_rho_normalized_newton5/**/result.json`
+
+正式収束は第1次修正後の39/54件から53/54件へ改善した。Oracleは22/27件から27/27件、Fine-gridは17/27件から26/27件となり、`max_iter` は8件から0件へ減った。特にlambda 0.03は1/6件から6/6件、lambda 0.1は0/6件から6/6件へ改善し、問題だったrhoの増減振動も大幅に減少した。
+
+残った未収束はFine-grid seed 42、lambda 0.003の1件だけである。個別結果は [`result.json`](../outputs/pilot_diagnostic/adaptive_rho_normalized_newton5/fine_grid_seed_42/lambda_0.003/result.json) にある。
+
+| 指標 | 最終56反復目 | 返却された6反復目 |
+|---|---:|---:|
+| 主残差比 | ほぼ0 | 530.16 |
+| 双対残差比 | 2.00 | 34.05 |
+| rho | 32 | 2 |
+| 停止理由 | `stagnated` | `best_iterate` |
+
+56反復目はrho更新間隔5の周期外だった。主残差がほぼ0となって双対残差側が優勢になった直後、次の60反復目のrho更新を待たずに停滞カウントが10へ達して停止していた。したがって、第2次修正の方向は有効だが、周期更新と毎反復の停滞停止との間に残る早期停止と判断した。
+
+## 10. 第3次修正
+
+停滞上限へ達した場合は、通常の更新周期外でもrho balancingを一度評価するよう変更した。
+
+1. 正式な残差収束を最初に確認する。
+2. 通常のrho更新周期、または停滞上限到達のどちらかでbalancingを評価する。
+3. rhoを変更できた場合はscaled dual変数を補正し、停滞カウントを0へ戻して継続する。
+4. rhoを変更できない場合だけ `stagnated` として停止する。
+
+履歴には、通常周期による評価か停滞回避による評価かを区別する `rho_update_trigger` を追加した。値は `interval`、`stagnation_escape`、`none` のいずれかである。
+
+また、第2次診断を上書きしないよう、新しい既定run名を次へ変更した。
+
+```text
+adaptive_rho_normalized_stagnation_escape_newton5
+```
+
+回帰テストでは、通常周期外で停滞上限へ達した際にrhoを変更して正式収束へ進むケースと、rho上限のため変更できず従来どおり停滞停止するケースの両方を確認した。
+
+## 11. 現在の到達点
 
 2026年8月19日時点の状態は次のとおりである。
 
@@ -634,21 +674,21 @@ adaptive_rho_normalized_newton5
 6. 初期値を推定結果としてbest返却する問題は解消した。
 7. 小lambdaを使えば、lambdaによって異なる正則化経路が生成される。
 8. 第1次の適応的rhoで39/54件まで正式収束率が改善した。
-9. 残る主因として、停滞判定の順序と、生残差によるrho振動を特定した。
-10. 上記2点を第2次修正で変更した。
+9. 第2次修正により53/54件が正式収束し、lambda 0.03と0.1は全件収束した。
+10. 残る1件を、rho更新周期直前の停滞停止として特定した。
+11. 第3次修正で停滞時の周期外rho balancingを追加した。
 
 ### まだ確定していないこと
 
-1. 第2次修正後の54件が全件正式収束するか。
-2. lambda 0.03と0.1のFine-gridが安定するか。
-3. 完全な候補集合の下でBICがどのlambdaを選ぶか。
-4. Fine-gridで不要な境界が正しく融合されるか。
-5. Off-grid、Small、No-changeを含む各20反復の性能。
-6. 係数関数のRMISE、変化点precision/recall、位置誤差。
+1. 第3次修正後の54件が全件正式収束するか。
+2. 完全な候補集合の下でBICがどのlambdaを選ぶか。
+3. Fine-gridで不要な境界が正しく融合されるか。
+4. Off-grid、Small、No-changeを含む各20反復の性能。
+5. 係数関数のRMISE、変化点precision/recall、位置誤差。
 
-したがって、現時点では最初の1,200件から手法性能を結論づけず、第2次修正後の診断ゲート通過を次の判断点とする。
+したがって、現時点では最初の1,200件から手法性能を結論づけず、第3次修正後の診断ゲート通過を次の判断点とする。
 
-## 10. 次の実行と合格条件
+## 12. 次の実行と合格条件
 
 リモートでは次を実行する。
 
@@ -665,9 +705,9 @@ adaptive_rho_normalized_newton5
 新しい出力先は次である。
 
 ```text
-outputs/pilot_diagnostic/adaptive_rho_normalized_newton5/
-outputs/pilot_diagnostic/adaptive_rho_normalized_newton5_summary.csv
-outputs/pilot_diagnostic/adaptive_rho_normalized_newton5_gate.json
+outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5/
+outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_summary.csv
+outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_gate.json
 ```
 
 本パイロットへ進む条件は次のすべてである。
@@ -687,7 +727,7 @@ outputs/pilot_diagnostic/adaptive_rho_normalized_newton5_gate.json
 3. line searchの失敗頻度を確認し、必要なら最大縮小回数を増やす。
 4. 失敗lambdaだけを再実行し、収束例を回帰対照として含める。
 
-## 11. 監査証跡
+## 13. 監査証跡
 
 | コミット | 内容 |
 |---|---|
@@ -707,7 +747,7 @@ outputs/pilot_diagnostic/adaptive_rho_normalized_newton5_gate.json
 
 なお、全体テストには `outputs/result.json` を前提とする既存のpredict-onlyテストがあり、そのファイルがない環境では1件失敗する。この失敗は今回のADMM・BIC修正とは独立である。
 
-## 12. この経緯から得られた方法論上の教訓
+## 14. この経緯から得られた方法論上の教訓
 
 1. **予測指標だけで最適化の成功を判断しない。** \(C^{td}\) が妥当な値でも、ADMM制約が未収束である場合がある。
 2. **双対残差0だけでは収束ではない。** \(z\) が動かず、主残差が残る場合がある。

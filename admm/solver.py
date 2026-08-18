@@ -301,6 +301,8 @@ class FusedLassoADMMSolver:
             # 当該反復後の rho と更新方向。
             "rho_next": [],
             "rho_update": [],
+            # rho balancing を評価した契機（通常周期または停滞回避）。
+            "rho_update_trigger": [],
             # Boyd 型の停止判定で使う許容誤差（絶対 + 相対）
             "primal_tolerance": [],
             "dual_tolerance": [],
@@ -620,6 +622,7 @@ class FusedLassoADMMSolver:
             history["gamma_step_norm"].append(gamma_step_norm)
             history["rho_next"].append(float(rho_current))
             history["rho_update"].append("none")
+            history["rho_update_trigger"].append("none")
 
             if np.isfinite(total_objective) and total_objective < best_objective:
                 best_objective = float(total_objective)
@@ -653,13 +656,29 @@ class FusedLassoADMMSolver:
             # 停止許容誤差で正規化した residual balancing。scaled dual 変数 u は
             # rho の変更前後で unscaled dual が不変になるよう補正する。
             # 適応更新を停滞停止より先に行い、rho が変わった場合は新しい拡大罰則の
-            # 下で反復を継続できるよう停滞カウントをリセットする。
+            # 下で反復を継続できるよう停滞カウントをリセットする。通常の更新周期外で
+            # 停滞上限へ達した場合も一度 balancing を試し、次の周期更新直前での
+            # 早期停止を避ける。
+            interval_rho_update_due = (
+                (admm_iter + 1) % int(self.rho_update_interval) == 0
+            )
+            stagnation_rho_escape_due = (
+                stagnation_count >= stagnation_patience
+            )
+            rho_update_due = (
+                interval_rho_update_due or stagnation_rho_escape_due
+            )
             should_update_rho = (
                 bool(self.adaptive_rho)
-                and (admm_iter + 1) % int(self.rho_update_interval) == 0
+                and rho_update_due
                 and (admm_iter + 1) < int(self.max_admm_iter)
             )
             if should_update_rho:
+                rho_update_trigger = (
+                    "interval"
+                    if interval_rho_update_due
+                    else "stagnation_escape"
+                )
                 rho_old = rho_current
                 rho_update = _rho_balance_action(
                     primal_residual=primal_residual,
@@ -686,6 +705,7 @@ class FusedLassoADMMSolver:
                     rho_update = "none"
                 history["rho_next"][-1] = float(rho_current)
                 history["rho_update"][-1] = rho_update
+                history["rho_update_trigger"][-1] = rho_update_trigger
 
             if stagnation_count >= stagnation_patience:
                 stopping_reason = "stagnated"
