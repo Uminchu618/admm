@@ -210,9 +210,12 @@ uv run scripts/visualize_lambda_results.py \
 ./scripts/pilot/aggregate_diagnostic.sh
 ```
 
-出力先は `outputs/pilot_diagnostic/adaptive_rho_newton5/` です。
+出力先は `outputs/pilot_diagnostic/adaptive_rho_normalized_newton5/` です。
 集計後には `check_diagnostic.py` が54件の正式収束、返却残差、BIC候補、
 正則化経路の変化を検査し、不合格なら終了コード1を返します。
+
+適応的rhoは主・双対残差を各停止許容誤差で正規化して比較します。
+rhoを更新した反復では停滞カウントをリセットし、更新直後の早期停止を防ぎます。
 固定rhoやNewtonステップ数を比較するときは、別のrun名を必ず指定して結果を分離します。
 
 ```bash

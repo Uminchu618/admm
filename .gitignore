@@ -25,3 +25,4 @@ wheels/
 /outputs/real_cv/framingham/framingham_5fold_seed1234
 
 /outputs/pilot
+/outputs/pilot_diagnostic

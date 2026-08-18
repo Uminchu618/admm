@@ -45,7 +45,7 @@ lambda_fuse = 10.0
 rho = 1.0
 
 # adaptive_rho:
-#   primal/dual residual の偏りに応じて rho を更新する。
+#   primal/dual residual をそれぞれの停止許容誤差で正規化し、その偏りに応じて rho を更新する。
 #   既存実験の再現性のため標準configでは無効。診断実験では有効化する。
 adaptive_rho = false
 rho_balance_mu = 10.0
@@ -80,6 +80,7 @@ admm_tol_rel = 1e-3
 #   β/γ 更新量が newton_tol 以下で、objective の相対変化もほぼ 0 の状態が続いた場合だけ停止する。
 #   さらに residual が通常の許容値の 10 倍以内まで近づいている場合に限るため、
 #   最適値から遠い一時的な停滞では止めない。
+#   適応的 rho が更新された場合は、新しい rho で反復を続けるため停滞回数をリセットする。
 admm_stagnation_tol = 1e-10
 admm_stagnation_patience = 10
 

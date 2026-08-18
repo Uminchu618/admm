@@ -6,7 +6,7 @@ train_dir="${PILOT_TRAIN_DIR:-$repo_root/data/pilot/train}"
 eval_dir="${PILOT_EVAL_DIR:-$repo_root/data/pilot/eval}"
 lambda_grid="${PILOT_DIAGNOSTIC_LAMBDA_GRID:-$repo_root/generation/pilot/diagnostic_lambda_grid.json}"
 config_template="${PILOT_DIAGNOSTIC_CONFIG:-$repo_root/generation/pilot/diagnostic_config.toml}"
-run_name="${PILOT_DIAGNOSTIC_RUN:-adaptive_rho_newton5}"
+run_name="${PILOT_DIAGNOSTIC_RUN:-adaptive_rho_normalized_newton5}"
 output_dir="${PILOT_DIAGNOSTIC_OUTPUT_DIR:-$repo_root/outputs/pilot_diagnostic/$run_name}"
 uv_bin="${UV_BIN:-$(command -v uv)}"
 

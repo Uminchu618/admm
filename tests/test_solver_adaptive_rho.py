@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from admm.solver import FusedLassoADMMSolver
+from admm.solver import FusedLassoADMMSolver, _rho_balance_action
 
 
 class _QuadraticBetaObjective:
@@ -74,6 +74,36 @@ def test_adaptive_rho_increases_when_primal_dominates() -> None:
     assert history["rho_next"][0] == 2.0
     assert history["rho_update"][0] == "increase"
     assert history["rho_final"] == 2.0
+
+
+def test_rho_balance_uses_residuals_normalized_by_tolerance() -> None:
+    # 生の残差なら dual=2.0 が primal=0.1 より大きく rho を下げる場面だが、
+    # 停止許容誤差に対しては primal 側が 100 倍、dual 側が 2 倍なので増加させる。
+    action = _rho_balance_action(
+        primal_residual=0.1,
+        dual_residual=2.0,
+        primal_tolerance=0.001,
+        dual_tolerance=1.0,
+        mu=10.0,
+    )
+
+    assert action == "increase"
+
+
+def test_rho_change_resets_stagnation_before_stopping() -> None:
+    solver = _solver(max_admm_iter=4, adaptive_rho=True)
+    solver.admm_tol_primal = 0.1
+    solver.admm_tol_dual = 0.1
+    solver.admm_stagnation_tol = 1.0
+    solver.admm_stagnation_patience = 1
+    solver.newton_tol = 100.0
+
+    _, _, _, _, history = solver.solve(*_inputs())
+
+    assert history["rho_update"][:2] == ["increase", "increase"]
+    assert history["stagnation_count"][:2] == [0, 0]
+    assert history["stopping_reason"] == "residual_converged"
+    assert history["n_admm_iter"] == 3
 
 
 def test_initial_best_is_not_returned_as_estimate() -> None:

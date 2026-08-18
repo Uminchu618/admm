@@ -23,6 +23,33 @@ from .objective import HazardAFTObjective
 from .types import ArrayLike
 
 
+def _normalized_residual(residual: float, tolerance: float) -> float:
+    """停止許容誤差に対する残差比を返す。"""
+
+    if tolerance > 0.0:
+        return float(residual) / float(tolerance)
+    return 0.0 if residual <= 0.0 else float(np.inf)
+
+
+def _rho_balance_action(
+    *,
+    primal_residual: float,
+    dual_residual: float,
+    primal_tolerance: float,
+    dual_tolerance: float,
+    mu: float,
+) -> str:
+    """正規化残差を比較し、rho の更新方向を返す。"""
+
+    primal_ratio = _normalized_residual(primal_residual, primal_tolerance)
+    dual_ratio = _normalized_residual(dual_residual, dual_tolerance)
+    if primal_ratio > float(mu) * dual_ratio:
+        return "increase"
+    if dual_ratio > float(mu) * primal_ratio:
+        return "decrease"
+    return "none"
+
+
 class FusedLassoADMMSolver:
     """ADMM による fused lasso ソルバ（骨格）。"""
 
@@ -623,12 +650,10 @@ class FusedLassoADMMSolver:
             ):
                 stopping_reason = "residual_converged"
                 break
-            if stagnation_count >= stagnation_patience:
-                stopping_reason = "stagnated"
-                break
-
-            # Boyd et al. の residual balancing。scaled dual 変数 u は
+            # 停止許容誤差で正規化した residual balancing。scaled dual 変数 u は
             # rho の変更前後で unscaled dual が不変になるよう補正する。
+            # 適応更新を停滞停止より先に行い、rho が変わった場合は新しい拡大罰則の
+            # 下で反復を継続できるよう停滞カウントをリセットする。
             should_update_rho = (
                 bool(self.adaptive_rho)
                 and (admm_iter + 1) % int(self.rho_update_interval) == 0
@@ -636,25 +661,35 @@ class FusedLassoADMMSolver:
             )
             if should_update_rho:
                 rho_old = rho_current
-                rho_update = "none"
-                if primal_residual > float(self.rho_balance_mu) * dual_residual:
+                rho_update = _rho_balance_action(
+                    primal_residual=primal_residual,
+                    dual_residual=dual_residual,
+                    primal_tolerance=primal_tolerance,
+                    dual_tolerance=dual_tolerance,
+                    mu=float(self.rho_balance_mu),
+                )
+                if rho_update == "increase":
                     rho_current = min(
                         rho_old * float(self.rho_increase_factor),
                         float(self.rho_max),
                     )
-                    if rho_current > rho_old:
-                        rho_update = "increase"
-                elif dual_residual > float(self.rho_balance_mu) * primal_residual:
+                elif rho_update == "decrease":
                     rho_current = max(
                         rho_old / float(self.rho_decrease_factor),
                         float(self.rho_min),
                     )
-                    if rho_current < rho_old:
-                        rho_update = "decrease"
                 if rho_current != rho_old:
                     u *= rho_old / rho_current
+                    stagnation_count = 0
+                    history["stagnation_count"][-1] = 0
+                else:
+                    rho_update = "none"
                 history["rho_next"][-1] = float(rho_current)
                 history["rho_update"][-1] = rho_update
+
+            if stagnation_count >= stagnation_patience:
+                stopping_reason = "stagnated"
+                break
 
         terminal_iter = len(history["objective"]) - 1
         converged = bool(
