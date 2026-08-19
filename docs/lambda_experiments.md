@@ -231,6 +231,51 @@ SGE_TASK_ID=1 \
 ./scripts/pilot/run_diagnostic_task.sh
 ```
 
+## 診断通過後の本パイロット
+
+第3次診断は54/54件で正式収束し、自動ゲートを通過しました。本パイロットは
+Oracle、Fine-grid、Off-grid、Small、No-changeを各20反復、9 lambdaで実行するため、
+合計タスク数は `5 * 20 * 9 = 900` です。
+
+既定値は、診断で合格した次の条件へ固定されています。
+
+- lambda: `0, 0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.25`
+- `adaptive_rho = true`
+- `newton_steps_per_admm = 5`
+- `rho_update_interval = 5`
+- 停滞時の周期外rho balancingを有効化
+
+リモートでデータを生成した後、次の順に実行します。
+
+```bash
+./scripts/pilot/generate_data.sh
+./scripts/pilot/submit.sh
+qstat
+./scripts/pilot/aggregate.sh
+uv run scripts/pilot/visualize_results.py
+```
+
+`submit.sh` は100個の学習CSVと100個の独立評価CSV、9個のlambdaを検証し、
+SGEアレイ範囲を `1-900` として動的に指定します。出力は旧パイロットを上書きせず、
+次へ保存されます。
+
+```text
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5/
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_summary.csv
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_gate.json
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_visualizations/
+```
+
+別名で再実行する場合は、投入・集計・可視化で同じ名前または明示パスを使います。
+
+```bash
+PILOT_RUN_NAME=my_run ./scripts/pilot/submit.sh
+PILOT_RUN_NAME=my_run ./scripts/pilot/aggregate.sh
+uv run scripts/pilot/visualize_results.py \
+  --summary outputs/pilot/my_run_summary.csv \
+  --output-dir outputs/pilot/my_run_visualizations
+```
+
 ## 設計のポイント
 
 ### 1. 再現性の確保

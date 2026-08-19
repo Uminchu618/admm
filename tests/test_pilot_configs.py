@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 from generation.extended_aft_step_generator import build_generator
@@ -42,5 +43,27 @@ def test_pilot_scenario_configs() -> None:
     lambda_grid = json.loads(
         (config_dir / "lambda_grid.json").read_text(encoding="utf-8")
     )
-    assert len(lambda_grid["lambda_values"]) == 12
-    assert lambda_grid["lambda_values"][0] == 0.0
+    diagnostic_lambda_grid = json.loads(
+        (config_dir / "diagnostic_lambda_grid.json").read_text(encoding="utf-8")
+    )
+    assert lambda_grid["lambda_values"] == [
+        0.0,
+        0.0001,
+        0.0003,
+        0.001,
+        0.003,
+        0.01,
+        0.03,
+        0.1,
+        0.25,
+    ]
+    assert lambda_grid["lambda_values"] == diagnostic_lambda_grid["lambda_values"]
+
+    solver_config = tomllib.loads(
+        (config_dir / "diagnostic_config.toml").read_text(encoding="utf-8")
+    )
+    assert solver_config["adaptive_rho"] is True
+    assert solver_config["newton_steps_per_admm"] == 5
+    assert solver_config["rho_update_interval"] == 5
+    assert solver_config["rho_balance_mu"] == 10.0
+    assert solver_config["max_admm_iter"] == 1000

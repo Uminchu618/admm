@@ -17,6 +17,7 @@ import pandas as pd
 
 
 SCENARIO_ORDER = ["oracle", "fine_grid", "off_grid", "small", "no_change"]
+DEFAULT_PILOT_RUN = "adaptive_rho_normalized_stagnation_escape_newton5"
 SCENARIO_LABELS = {
     "oracle": "Oracle",
     "fine_grid": "Fine-grid",
@@ -450,13 +451,13 @@ def main() -> None:
     parser.add_argument(
         "--summary",
         type=Path,
-        default=Path("outputs/pilot_summary.csv"),
-        help="Path to pilot_summary.csv.",
+        default=Path("outputs/pilot") / f"{DEFAULT_PILOT_RUN}_summary.csv",
+        help="Path to the full-pilot summary CSV.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("outputs/pilot_visualizations"),
+        default=Path("outputs/pilot") / f"{DEFAULT_PILOT_RUN}_visualizations",
         help="Directory for PNG, CSV, and Markdown outputs.",
     )
     parser.add_argument(

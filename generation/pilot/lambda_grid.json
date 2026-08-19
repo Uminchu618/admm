@@ -1,4 +1,14 @@
 {
-  "description": "Pilot lambda grid on the mean-loss scale",
-  "lambda_values": [0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0]
+  "description": "Validated pilot lambda grid on the mean-loss scale",
+  "lambda_values": [
+    0.0,
+    0.0001,
+    0.0003,
+    0.001,
+    0.003,
+    0.01,
+    0.03,
+    0.1,
+    0.25
+  ]
 }

@@ -19,7 +19,7 @@
 
 最初のパイロットは、5シナリオ、各20データセット、12個のlambdaからなる1,200件である。集計上は独立評価データの \(C^{td}\) がOracleで約0.70となり、一見すると妥当に見えた。しかし、個別結果まで確認すると、正のlambda 1,100件はすべて1,000反復の上限に達しており、正式収束は0件だった。さらに836件は初期値を返し、lambda 4以上の700件は \(C^{td}=0.5\) になっていた。このため、当初のBICが正のlambdaを91/100データセットで選んだ結果は無効と判断した。
 
-第1次修正後、OracleとFine-gridに絞った54件では正式収束が39/54件まで改善した。一方、lambda 0.03は1/6件、0.1は0/6件しか収束せず、Fine-grid全体も17/27件に留まった。反復履歴から、rho更新と停滞判定の順序、および生残差によるrhoの振動を原因候補として特定し、第2次修正を行った。現在の判断点は、第2次修正後の同じ54件が自動ゲートを通過するかである。
+第1次修正後、OracleとFine-gridに絞った54件では正式収束が39/54件まで改善した。一方、lambda 0.03は1/6件、0.1は0/6件しか収束せず、Fine-grid全体も17/27件に留まった。反復履歴から、rho更新と停滞判定の順序、および生残差によるrhoの振動を原因候補として特定し、第2次修正を行った。第2次修正後は53/54件、第3次修正後は54/54件が正式収束し、自動ゲートを通過した。これを受け、本パイロット実行系を合格済みの9 lambda、適応的rho、Newton 5ステップへ切り替えた。
 
 ### 1.2 データ・結果・図の所在
 
@@ -34,7 +34,10 @@
 | 第1次修正後の集計 | [`adaptive_rho_newton5_summary.csv`](../outputs/pilot_diagnostic/adaptive_rho_newton5_summary.csv) | Oracle/Fine-grid、seed 42–44、9 lambdaの54件 |
 | 第1次修正後の判定 | [`adaptive_rho_newton5_gate.json`](../outputs/pilot_diagnostic/adaptive_rho_newton5_gate.json) | 39/54収束、総合 `passed=false` |
 | 第1次修正後の個別結果 | `outputs/pilot_diagnostic/adaptive_rho_newton5/{scenario}_seed_{seed}/lambda_{lambda}/result.json` | 返却反復と残差許容誤差を含む詳細結果 |
-| 第2次修正後の出力予定 | `outputs/pilot_diagnostic/adaptive_rho_normalized_newton5*` | 再実行後に作られる比較対象 |
+| 第2次修正後の集計 | [`adaptive_rho_normalized_newton5_summary.csv`](../outputs/pilot_diagnostic/adaptive_rho_normalized_newton5_summary.csv) | 53/54件が正式収束 |
+| 第3次修正後の集計 | [`adaptive_rho_normalized_stagnation_escape_newton5_summary.csv`](../outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_summary.csv) | 54/54件が正式収束 |
+| 第3次修正後の判定 | [`adaptive_rho_normalized_stagnation_escape_newton5_gate.json`](../outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_gate.json) | 全検査がtrue、総合 `passed=true` |
+| 次の本パイロット出力 | `outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5/` | 5シナリオ、各20反復、9 lambdaの900件 |
 
 たとえば、最初のOracle seed 42、lambda 0.25の結果は [`result.json`](../outputs/pilot/oracle_seed_42/lambda_0.25/result.json) にある。このファイルが記録する元データの絶対パスは次である。
 
@@ -83,7 +86,20 @@ Oracle / Fine-grid 各3 seed × 9 lambda = 54 fitting
   └─ rho変更時の停滞カウントリセット
   │
   ▼
-新しい54件診断の実行・ゲート判定待ち
+第2次診断: 53/54正式収束
+  │
+  └─ Fine-grid seed 42、lambda 0.003だけ周期直前に停滞停止
+  │
+  ▼
+第3次修正
+  └─ 停滞上限時に周期外rho balancingを1回評価
+  │
+  ▼
+第3次診断: 54/54正式収束、ゲート passed=true
+  │
+  ▼
+本パイロットを合格済み条件へ変更
+  └─ 5シナリオ × 20反復 × 9 lambda = 900 fitting
 ```
 
 この流れを「見た値 → 判断 → 修正」に縮約すると次のようになる。
@@ -95,6 +111,8 @@ Oracle / Fine-grid 各3 seed × 9 lambda = 54 fitting
 | 第1次修正後の集計 | 39/54正式収束、初期値返却0、lambda経路変化あり | 第1次修正は有効だが、0.03と0.1に未解決問題 | 15件の失敗JSONの反復履歴を比較 |
 | 停滞例 | rhoを1→2→4と更新しても停滞カウントが継続し22反復目で停止 | rho変更直後の探索を早期終了している | rho変更時に停滞カウントをリセット |
 | 振動例 | Fine-grid seed 42、lambda 0.03でrho増加51回・減少46回、最終主残差比362.6 | 生残差の大小と正式停止までの距離が一致しない | 許容誤差で正規化した残差比でrhoを更新 |
+| 第2次修正後 | 53/54正式収束、残る1件は56反復目に周期外で `stagnated` | 次の周期更新を待つ前に停止している | 停滞上限時の周期外rho balancingを追加 |
+| 第3次修正後 | 54/54正式収束、全54件BIC候補、全ゲートtrue | 数値診断を通過し本パイロットへ進める | 本実験を9 lambda、適応的rho、Newton 5ステップ、900タスクへ変更 |
 
 ## 3. 研究上の出発点
 
@@ -677,55 +695,72 @@ adaptive_rho_normalized_stagnation_escape_newton5
 9. 第2次修正により53/54件が正式収束し、lambda 0.03と0.1は全件収束した。
 10. 残る1件を、rho更新周期直前の停滞停止として特定した。
 11. 第3次修正で停滞時の周期外rho balancingを追加した。
+12. 第3次修正後は54/54件が正式収束・BIC候補となり、自動ゲートの全検査がtrueになった。
+13. 第2次修正後から結果が変わったのはFine-grid seed 42、lambda 0.003の1件だけで、56反復目の `stagnation_escape` によりrhoが32から16へ下がり、57反復目に正式収束した。
+14. 完全な候補集合によるBIC選択lambdaは、Fine-gridで0.03、0.03、0.1、Oracleで0.03、0.25、0.03だった。
 
 ### まだ確定していないこと
 
-1. 第3次修正後の54件が全件正式収束するか。
-2. 完全な候補集合の下でBICがどのlambdaを選ぶか。
-3. Fine-gridで不要な境界が正しく融合されるか。
-4. Off-grid、Small、No-changeを含む各20反復の性能。
-5. 係数関数のRMISE、変化点precision/recall、位置誤差。
+1. Fine-gridで不要な境界が正しく融合されるか。
+2. Off-grid、Small、No-changeを含む各20反復の性能。
+3. 係数関数のRMISE、変化点precision/recall、位置誤差。
+4. 100データセット、900 fittingでも54件診断と同じ数値安定性を維持するか。
 
-したがって、現時点では最初の1,200件から手法性能を結論づけず、第3次修正後の診断ゲート通過を次の判断点とする。
+したがって、最初の1,200件から手法性能を結論づけず、合格済み条件による900件の本パイロットを次の判断点とする。
 
 ## 12. 次の実行と合格条件
 
-リモートでは次を実行する。
+第3次診断は次の結果で合格した。
+
+- 54/54件が完了、正式収束、BIC候補
+- 6/6データセットにBIC候補あり
+- 返却残差、返却反復、初期値フォールバック、正則化経路の全検査がtrue
+- 総合判定 `passed=true`
+
+この結果を受け、本パイロットの既定条件を診断と同じ9 lambda、適応的rho、
+Newton 5ステップに変更した。リモートでは次を実行する。
 
 ```bash
-./scripts/pilot/submit_diagnostic.sh
+./scripts/pilot/submit.sh
 ```
 
 完了後に集計とゲート判定を行う。
 
 ```bash
-./scripts/pilot/aggregate_diagnostic.sh
+./scripts/pilot/aggregate.sh
 ```
 
 新しい出力先は次である。
 
 ```text
-outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5/
-outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_summary.csv
-outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_gate.json
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5/
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_summary.csv
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_gate.json
 ```
 
-本パイロットへ進む条件は次のすべてである。
+本パイロットは5シナリオ、各20反復、9 lambdaなので900件である。
+`submit.sh` は学習CSV 100件、独立評価CSV 100件、lambda 9点を検査したうえで、
+SGEアレイ範囲 `1-900` を動的に指定する。旧 `outputs/pilot` 直下の1,200件は
+上書きしない。
 
-- 54/54件が完了
-- 54/54件が `residual_converged`
+本パイロットの合格条件は次のすべてである。
+
+- 900/900件が完了
+- 900/900件が `residual_converged`
 - 返却主残差比と双対残差比がともに1以下
 - 初期値フォールバックなし
 - 各データセットにBIC候補あり
 - 小から中lambdaで正則化経路が変化
 - 係数、\(z\)、尤度、残差、BICが同じ返却反復に対応
 
-不合格の場合は、複数パラメータを同時に変えず、次の順で原因を切り分ける。
+不合格の場合は、診断54件との差分を確認し、失敗したシナリオ・seed・lambdaだけを
+再実行して原因を切り分ける。診断で合格済みのソルバー条件は、再現性を保つため
+根拠なく同時変更しない。
 
-1. `rho_balance_mu` と `rho_update_interval` を比較する。
-2. `newton_steps_per_admm` を5から10へ増やす。
-3. line searchの失敗頻度を確認し、必要なら最大縮小回数を増やす。
-4. 失敗lambdaだけを再実行し、収束例を回帰対照として含める。
+1. 欠損・ジョブ失敗と数値的未収束を分ける。
+2. 未収束なら `stopping_reason`、返却残差比、`rho_update_trigger` を確認する。
+3. シナリオ固有かlambda固有かを集計する。
+4. 失敗ケースだけを再実行し、同条件の収束例を回帰対照として含める。
 
 ## 13. 監査証跡
 
@@ -735,6 +770,7 @@ outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_gate.
 | `2a39560` | 5シナリオのパイロット設定とSGE実行スクリプト |
 | `21d7b85` | 返却反復整合、未収束BIC除外、適応的rho、小lambda診断とゲート |
 | `7069758` | 正規化残差によるrho更新、rho変更時の停滞カウントリセット |
+| `8505365` | 停滞上限時の周期外rho balancingと更新理由の記録 |
 
 主要な検証テストは次である。
 
@@ -744,6 +780,7 @@ outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5_gate.
 - [`tests/test_solver_lambda_scaling.py`](../tests/test_solver_lambda_scaling.py)
 - [`tests/test_solver_adaptive_rho.py`](../tests/test_solver_adaptive_rho.py)
 - [`tests/test_pilot_diagnostic_gate.py`](../tests/test_pilot_diagnostic_gate.py)
+- [`tests/test_pilot_submission.py`](../tests/test_pilot_submission.py)
 
 なお、全体テストには `outputs/result.json` を前提とする既存のpredict-onlyテストがあり、そのファイルがない環境では1件失敗する。この失敗は今回のADMM・BIC修正とは独立である。
 
