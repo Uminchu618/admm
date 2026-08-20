@@ -4,7 +4,7 @@
 #$ -cwd
 #$ -l s_vmem=4G
 #$ -pe def_slot 2
-#$ -tc 200
+#$ -tc 600
 #$ -o logs/pilot
 #$ -e logs/pilot
 
