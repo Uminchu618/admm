@@ -15,7 +15,11 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from scripts.real_cv.aggregate_results import collect_results, summarize_by_lambda
+from scripts.real_cv.aggregate_results import (
+    collect_results,
+    mark_selected_lambda,
+    summarize_by_lambda,
+)
 
 
 def _as_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
@@ -92,7 +96,25 @@ def _lambda_summary_for_plots(fold_df: pd.DataFrame) -> pd.DataFrame:
             ),
             axis=1,
         )
-    return grouped
+
+    expected_n_folds = int(prepared["fold"].nunique())
+    cv_selection = mark_selected_lambda(
+        summarize_by_lambda(prepared, expected_n_folds=expected_n_folds)
+    )
+    selection_columns = [
+        "lambda_fuse",
+        "n_results",
+        "n_converged_folds",
+        "n_finite_c_td_folds",
+        "n_folds_expected",
+        "fold_ids_complete",
+        "cv_eligible",
+        "cv_exclusion_reason",
+        "selected",
+    ]
+    return grouped.merge(
+        cv_selection[selection_columns], on="lambda_fuse", how="left"
+    )
 
 
 def _metric_error(summary_df: pd.DataFrame, metric: str, error: str) -> np.ndarray | None:
@@ -325,7 +347,16 @@ def plot_lambda_vs_c_td(
     _add_cox_test_reference(ax, cox_df, error=error)
     _add_aft_test_references(ax, aft_df, error=error)
 
-    best_idx = valid_summary["c_td_test_mean"].idxmax()
+    selected_rows = valid_summary.iloc[0:0]
+    if "selected" in valid_summary.columns:
+        selected_rows = valid_summary.loc[
+            valid_summary["selected"].astype("string").str.lower().isin({"true", "1"})
+        ]
+    best_idx = (
+        selected_rows.index[0]
+        if len(selected_rows) == 1
+        else valid_summary["c_td_test_mean"].idxmax()
+    )
     best_lambda = float(valid_summary.loc[best_idx, "lambda_fuse"])
     best_score = float(valid_summary.loc[best_idx, "c_td_test_mean"])
     ax.axvline(best_lambda, color="#d62728", linestyle="--", linewidth=1.3)
@@ -579,7 +610,16 @@ def build_model_comparison_table(
 
     admm = summary_df.dropna(subset=["c_td_test_mean"])
     if not admm.empty:
-        best = admm.sort_values("c_td_test_mean", ascending=False).iloc[0]
+        selected = admm.iloc[0:0]
+        if "selected" in admm.columns:
+            selected = admm.loc[
+                admm["selected"].astype("string").str.lower().isin({"true", "1"})
+            ]
+        best = (
+            selected.iloc[0]
+            if len(selected) == 1
+            else admm.sort_values("c_td_test_mean", ascending=False).iloc[0]
+        )
         err_col = f"c_td_test_{error}"
         rows.append(
             {
@@ -741,7 +781,7 @@ def write_cv_tables(
     summary_output.parent.mkdir(parents=True, exist_ok=True)
     fold_df.to_csv(fold_output, index=False, encoding="utf-8")
     # 既存 aggregate_results.py と同じ列を先頭に残しつつ、可視化用列も保存する。
-    base_summary = summarize_by_lambda(fold_df)
+    base_summary = mark_selected_lambda(summarize_by_lambda(fold_df))
     extra_columns = [
         column
         for column in summary_df.columns
@@ -897,9 +937,14 @@ def main() -> None:
     for output in outputs:
         print(f"Saved plot to: {output}")
 
-    best = summary_df.dropna(subset=["c_td_test_mean"]).sort_values(
-        "c_td_test_mean", ascending=False
-    )
+    best = summary_df.dropna(subset=["c_td_test_mean"])
+    if "selected" in best.columns:
+        selected = best.loc[
+            best["selected"].astype("string").str.lower().isin({"true", "1"})
+        ]
+        if not selected.empty:
+            best = selected
+    best = best.sort_values("c_td_test_mean", ascending=False)
     if not best.empty:
         row = best.iloc[0]
         print(

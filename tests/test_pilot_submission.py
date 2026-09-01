@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 
-def test_submit_uses_derived_900_task_array(tmp_path: Path) -> None:
+def test_submit_uses_derived_4500_task_array_for_five_fold_cv(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     train_dir = tmp_path / "train"
     eval_dir = tmp_path / "eval"
@@ -52,13 +52,15 @@ def test_submit_uses_derived_900_task_array(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr
     args = capture_path.read_text(encoding="utf-8").splitlines()
     task_flag_index = args.index("-t")
-    assert args[task_flag_index + 1] == "1-900:1"
+    assert args[task_flag_index + 1] == "1-4500:1"
     exported = args[args.index("-v") + 1]
     assert "PILOT_CONFIG_TEMPLATE=" in exported
     assert "generation/pilot/diagnostic_config.toml" in exported
     assert "PILOT_LAMBDA_GRID=" in exported
     assert "generation/pilot/lambda_grid.json" in exported
     assert "PILOT_RUN_NAME=test_run" in exported
+    assert "PILOT_N_FOLDS=5" in exported
+    assert "PILOT_SPLIT_SEED=1234" in exported
     assert args[-1] == "qsub_pilot.sh"
 
 

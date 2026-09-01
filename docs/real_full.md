@@ -1,10 +1,19 @@
-# 実データ全体での lambda 実験
+# CV選択lambdaによる実データ全体の再学習
 
-CV ではなく、各 dataset の全 complete-case データを使って lambda ごとに再推定する手順です。出力は `outputs/real_full/{dataset}/{experiment_name}/lambda_{value}/` に保存します。
+5-fold CVで平均検証 `c_td` が最大となったlambdaを使い、各datasetの全
+complete-caseデータで1回だけ再推定する。出力は
+`outputs/real_full/{dataset}/{experiment_name}/lambda_{value}/` に保存する。
 
 ## スパコン実行
 
-既定では Support2 と Framingham の両方を、`lambda_grid.json` の 10 点で実行します。
+先に各datasetのCV集計を実行し、`selected_lambda.json` を作成する。
+
+```bash
+uv run scripts/real_cv/aggregate_results.py \
+  --base-dir outputs/real_cv/support2/support2_5fold_seed1234
+```
+
+既定では Support2 と Framingham の選択lambdaを各1 taskで再学習する。
 
 ```bash
 qsub qsub_real_full.sh
@@ -13,14 +22,14 @@ qsub qsub_real_full.sh
 タスク対応は次の通りです。
 
 - `DATASETS=support2,framingham`
-- `SGE_TASK_ID=1..10`: Support2 の lambda 10 点
-- `SGE_TASK_ID=11..20`: Framingham の lambda 10 点
+- `SGE_TASK_ID=1`: Support2
+- `SGE_TASK_ID=2`: Framingham
 
-lambda 数や dataset 数を変える場合は、`qsub_real_full.sh` の `#$ -t` も合わせて変更してください。
+dataset数を変える場合は、`qsub_real_full.sh` の `#$ -t` も合わせて変更する。
 
 ## 片方だけ実行する場合
 
-`#$ -t` を `1-10:1` に変更してから投げます。
+`#$ -t` を `1-1:1` に変更してから投げる。
 
 ```bash
 qsub -v DATASETS=support2 qsub_real_full.sh
@@ -32,15 +41,17 @@ qsub -v DATASETS=framingham qsub_real_full.sh
 - `UV_BIN`: uv のパス。既定は `/home/sagara/.local/bin/uv`
 - `DATASETS`: カンマ区切り dataset。既定は `support2,framingham`
 - `CONFIG_PATH`: ベース config。既定は `config.toml`
-- `LAMBDA_GRID`: lambda grid JSON。既定は `lambda_grid.json`
-- `EXPERIMENT_NAME`: 出力実験名。既定は `full_data`
+- `LAMBDA_SELECTION_MODE`: 既定は `cv`。過去の全lambda実験は `grid`
+- `CV_OUTPUT_BASE_DIR`: CV出力root。既定は `outputs/real_cv`
+- `N_FOLDS`, `SPLIT_SEED`: 選択JSONの実験名解決に使用
+- `EXPERIMENT_NAME`: 出力実験名。既定は `cv_selected_full`
 - `OUTPUT_BASE_DIR`: 出力 root。既定は `outputs/real_full`
 - `SUPPORT2_INPUT`: Support2 raw CSV
 - `FRAMINGHAM_INPUT`: Framingham raw CSV
 
-## 集計と BIC/lambda 図
+## 互換用の全lambda/BICモード
 
-ジョブ完了後に実行します。
+過去のBIC比較を再現する場合だけ、`LAMBDA_SELECTION_MODE=grid` を指定する。
 
 ```bash
 uv run scripts/real_cv/aggregate_full_results.py \
@@ -52,9 +63,9 @@ uv run scripts/real_cv/visualize_full_results.py \
   --output-dir outputs/real_full/plots
 ```
 
-生成される主なファイル:
+このモードでは従来どおり、全lambdaの集計とBIC図を生成できる。
 
 - `outputs/real_full/full_summary.csv`
 - `outputs/real_full/plots/lambda_vs_bic.png`
 
-BIC は `2 * neg_loglik_last + n_params * log(n_samples)` で計算します。`n_params` は `z_last` のうち `|z| > 1e-8` の数です。
+BICは主解析のlambda選択には使用しない。

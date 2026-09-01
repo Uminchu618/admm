@@ -64,6 +64,10 @@ uv run scripts/real_cv/aggregate_results.py \
   --base-dir outputs/real_cv/support2/support2_5fold_seed1234
 ```
 
+集計時には、5 foldすべてが正式収束し、有限な検証 `c_td` を持つlambdaだけを
+選択候補とする。平均検証 `c_td` が最大のlambdaを
+`selected_lambda.json` に保存する。同点時は大きいlambdaを選ぶ。
+
 CV 結果の可視化:
 
 ```bash
@@ -106,6 +110,10 @@ uv run scripts/real_cv/visualize_results.py \
 - `cv_fold_spaghetti.png`: fold 別 test `c_td` の lambda 軌跡
 - `cv_convergence_diagnostics.png`: ADMM iteration、残差、停止理由
 - `cv_model_comparison.png`: `--aft-summary` 指定時の ADMM/Cox/AFT 比較
+
+`summary_by_lambda.csv` の `cv_eligible` は選択候補としての適格性、
+`selected` は最終選択を表す。不完全fold、未収束、非有限Ctdの理由は
+`cv_exclusion_reason` に保存する。
 
 ローカルで 1 task だけ確認する場合:
 
