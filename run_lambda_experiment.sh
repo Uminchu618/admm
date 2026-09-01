@@ -2,14 +2,17 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")" && pwd)"
-data_dir="$repo_root/data/extended_aft_step"
-output_base_dir="$repo_root/outputs/lambda_experiments"
-config_template="$repo_root/config.toml"
-lambda_grid_file="$repo_root/lambda_grid.json"
+data_dir="${DATA_DIR:-$repo_root/data/extended_aft_step}"
+eval_data_dir="${EVAL_DATA_DIR:-$repo_root/data/extended_aft_step_eval}"
+output_base_dir="${OUTPUT_BASE_DIR:-$repo_root/outputs/lambda_experiments}"
+config_template="${CONFIG_TEMPLATE:-$repo_root/config.toml}"
+lambda_grid_file="${LAMBDA_GRID_FILE:-$repo_root/lambda_grid.json}"
 uv_bin="${UV_BIN:-/home/sagara/.local/bin/uv}"
 
-# データファイルリストを取得
-mapfile -t data_files < <(ls "$data_dir"/*.csv 2>/dev/null | sort)
+# データファイルリストを取得（macOS標準のbash 3.2でも動作する形）
+shopt -s nullglob
+data_files=("$data_dir"/*.csv)
+shopt -u nullglob
 if [ "${#data_files[@]}" -eq 0 ]; then
 	echo "No CSV files found in $data_dir" >&2
 	exit 1
@@ -22,7 +25,10 @@ if [ ! -f "$lambda_grid_file" ]; then
 fi
 
 # jq で lambda_values 配列を抽出
-mapfile -t lambda_values < <(jq -r '.lambda_values[]' "$lambda_grid_file")
+lambda_values=()
+while IFS= read -r lambda_value; do
+	lambda_values+=("$lambda_value")
+done < <(jq -r '.lambda_values[]' "$lambda_grid_file")
 if [ "${#lambda_values[@]}" -eq 0 ]; then
 	echo "No lambda values found in $lambda_grid_file" >&2
 	exit 1
@@ -55,10 +61,18 @@ data_idx=$((task_idx / n_lambda))
 lambda_idx=$((task_idx % n_lambda))
 
 selected_data="${data_files[$data_idx]}"
+selected_eval_data="$eval_data_dir/$(basename "$selected_data")"
 selected_lambda="${lambda_values[$lambda_idx]}"
+
+if [ ! -f "$selected_eval_data" ]; then
+	echo "Matching evaluation CSV not found: $selected_eval_data" >&2
+	echo "Generate paired data with generation/generate_extended_aft_step_datasets.py." >&2
+	exit 1
+fi
 
 echo "=== Task $SGE_TASK_ID / $total_patterns ==="
 echo "Data: $selected_data"
+echo "Eval data: $selected_eval_data"
 echo "Lambda: $selected_lambda"
 
 # 出力ディレクトリ構造: outputs/lambda_experiments/{data_name}/lambda_{value}/
@@ -76,10 +90,16 @@ sed -i.bak "s/^lambda_fuse = .*/lambda_fuse = $selected_lambda/" "$temp_config"
 
 output_json="$output_dir/result.json"
 
+if [ "${SKIP_EXISTING:-0}" = "1" ] && [ -f "$output_json" ]; then
+	echo "Skip existing result: $output_json"
+	exit 0
+fi
+
 cd "$repo_root"
 "$uv_bin" run main.py \
 	--config "$temp_config" \
 	--data "$selected_data" \
+	--eval-data "$selected_eval_data" \
 	--output "$output_json"
 
 echo "Saved result to: $output_json"

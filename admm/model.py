@@ -78,6 +78,13 @@ class ADMMHazardAFT:
         return_best_iterate: bool = True,
         clip_eta: float = 20.0,
         random_state: Optional[int] = None,
+        adaptive_rho: bool = False,
+        rho_balance_mu: float = 10.0,
+        rho_increase_factor: float = 2.0,
+        rho_decrease_factor: float = 2.0,
+        rho_update_interval: int = 10,
+        rho_min: float = 1e-6,
+        rho_max: float = 1e6,
     ) -> None:
 
         self.time_grid = time_grid
@@ -100,6 +107,13 @@ class ADMMHazardAFT:
         self.line_search_shrink = line_search_shrink
         self.line_search_c1 = line_search_c1
         self.return_best_iterate = return_best_iterate
+        self.adaptive_rho = adaptive_rho
+        self.rho_balance_mu = rho_balance_mu
+        self.rho_increase_factor = rho_increase_factor
+        self.rho_decrease_factor = rho_decrease_factor
+        self.rho_update_interval = rho_update_interval
+        self.rho_min = rho_min
+        self.rho_max = rho_max
         self.clip_eta = clip_eta
         self.random_state = random_state
 
@@ -168,8 +182,10 @@ class ADMMHazardAFT:
         self.z_ = z
         self.u_ = u
 
-        # 現状は適応 rho を未実装のため、実効 rho は初期値のまま。
-        self.rho_ = self.rho
+        # u_ は返却反復の scaled dual なので、rho_ も同じ反復に揃える。
+        self.rho_ = history.get(
+            "returned_rho", history.get("rho_final", self.rho)
+        )
 
         # デバッグ・収束確認用の履歴（目的関数値、残差など）を保持する。
         self.history_ = history
@@ -506,6 +522,13 @@ class ADMMHazardAFT:
             line_search_c1=self.line_search_c1,
             return_best_iterate=self.return_best_iterate,
             random_state=self.random_state,
+            adaptive_rho=self.adaptive_rho,
+            rho_balance_mu=self.rho_balance_mu,
+            rho_increase_factor=self.rho_increase_factor,
+            rho_decrease_factor=self.rho_decrease_factor,
+            rho_update_interval=self.rho_update_interval,
+            rho_min=self.rho_min,
+            rho_max=self.rho_max,
         )
 
         # dataclass でコンポーネントをまとめて返す。

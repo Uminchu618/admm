@@ -39,6 +39,20 @@ uv run generation/extended_aft_step_generator.py \
 
 設定は [generation/extended_aft_step_generator.config.json](generation/extended_aft_step_generator.config.json) を参照してください。
 
+`stepwise_beta.true_time_grid` はデータ生成時の真の係数関数、
+`analysis_time_grid` は推定モデルの時間区分を定義します。両者を分けることで、
+Fine-grid／Off-grid設定を生成できます。旧 `stepwise_beta.time_grid` も引き続き利用できます。
+
+Lambda並列実験用の学習・独立評価データは、同じファイル名で別ディレクトリへ一括生成します。
+
+```bash
+uv run generation/generate_extended_aft_step_datasets.py \
+  --output-dir data/extended_aft_step \
+  --eval-output-dir data/extended_aft_step_eval
+```
+
+評価データは既定で学習seedに100000を加えて生成されます。
+
 ### 単一実験の実行
 
 ```bash
@@ -68,7 +82,8 @@ qsub qsub.sh
 ```
 
 `qsub.sh` は `SGE_TASK_ID` を使って自動的に以下を切り替えます：
-- 処理するデータファイル（`data/extended_aft/*.csv`）
+- 処理するデータファイル（`data/extended_aft_step/*.csv`）
+- 対応する独立評価データ（`data/extended_aft_step_eval/*.csv`）
 - 使用する lambda値（`lambda_grid.json` から選択）
 
 #### 3. 結果の集計
@@ -115,7 +130,9 @@ uv run scripts/visualize_lambda_results.py \
 - `lambda_vs_convergence.png`: Lambda値と収束状況（primal/dual residual）
 - `lambda_vs_c_td_with_cox.png`: Cox の c_td 基準線付き比較図（`--cox-summary` 指定時）
 
-集計CSVには `c_td`（time-dependent C-index 相当）も含まれます。
+集計CSVの `c_td` は独立評価データ上の値です。`c_td_train`、`c_td_test` も
+明示的に保存されます。BICの自由度は
+`n_baseline_basis + n_features + n_change_points` として計算されます。
 
 ### ローカルでのテスト実行
 

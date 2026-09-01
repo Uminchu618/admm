@@ -23,6 +23,33 @@ from .objective import HazardAFTObjective
 from .types import ArrayLike
 
 
+def _normalized_residual(residual: float, tolerance: float) -> float:
+    """停止許容誤差に対する残差比を返す。"""
+
+    if tolerance > 0.0:
+        return float(residual) / float(tolerance)
+    return 0.0 if residual <= 0.0 else float(np.inf)
+
+
+def _rho_balance_action(
+    *,
+    primal_residual: float,
+    dual_residual: float,
+    primal_tolerance: float,
+    dual_tolerance: float,
+    mu: float,
+) -> str:
+    """正規化残差を比較し、rho の更新方向を返す。"""
+
+    primal_ratio = _normalized_residual(primal_residual, primal_tolerance)
+    dual_ratio = _normalized_residual(dual_residual, dual_tolerance)
+    if primal_ratio > float(mu) * dual_ratio:
+        return "increase"
+    if dual_ratio > float(mu) * primal_ratio:
+        return "decrease"
+    return "none"
+
+
 class FusedLassoADMMSolver:
     """ADMM による fused lasso ソルバ（骨格）。"""
 
@@ -45,6 +72,13 @@ class FusedLassoADMMSolver:
         line_search_c1: float,
         return_best_iterate: bool,
         random_state: Optional[int],
+        adaptive_rho: bool = False,
+        rho_balance_mu: float = 10.0,
+        rho_increase_factor: float = 2.0,
+        rho_decrease_factor: float = 2.0,
+        rho_update_interval: int = 10,
+        rho_min: float = 1e-6,
+        rho_max: float = 1e6,
     ) -> None:
         # objective: 近似対数尤度の value と β/γ の勾配・ヘッセを提供する目的関数。
         self.objective = objective
@@ -78,6 +112,15 @@ class FusedLassoADMMSolver:
         self.line_search_shrink = line_search_shrink
         self.line_search_c1 = line_search_c1
         self.return_best_iterate = return_best_iterate
+
+        # residual balancing による rho の適応更新。
+        self.adaptive_rho = adaptive_rho
+        self.rho_balance_mu = rho_balance_mu
+        self.rho_increase_factor = rho_increase_factor
+        self.rho_decrease_factor = rho_decrease_factor
+        self.rho_update_interval = rho_update_interval
+        self.rho_min = rho_min
+        self.rho_max = rho_max
 
         # random_state: 初期化や乱数を使う場合の再現性のためのシード。
         self.random_state = random_state
@@ -145,6 +188,7 @@ class FusedLassoADMMSolver:
         # objective.value は -log L のサンプル和なので O(N)。
         # (1/N) loss + lambda P と同じ解になるよう、loss + N*lambda P を解く。
         lambda_fuse_effective = float(n_samples) * lambda_fuse
+        rho_current = float(self.rho)
 
         K, n_beta = beta.shape
         if X_array.shape[1] != K:
@@ -159,6 +203,8 @@ class FusedLassoADMMSolver:
 
         if int(self.line_search_max_steps) <= 0:
             raise ValueError("line_search_max_steps は正の整数である必要があります。")
+        if not np.isfinite(rho_current) or rho_current <= 0.0:
+            raise ValueError("rho は正の有限値である必要があります。")
         if not (0.0 < float(self.line_search_shrink) < 1.0):
             raise ValueError("line_search_shrink は (0,1) の範囲である必要があります。")
         if not (0.0 < float(self.line_search_c1) < 1.0):
@@ -173,6 +219,16 @@ class FusedLassoADMMSolver:
             raise ValueError("admm_stagnation_tol は 0 以上である必要があります。")
         if int(self.admm_stagnation_patience) <= 0:
             raise ValueError("admm_stagnation_patience は正の整数である必要があります。")
+        if float(self.rho_balance_mu) <= 1.0:
+            raise ValueError("rho_balance_mu は 1 より大きい必要があります。")
+        if float(self.rho_increase_factor) <= 1.0:
+            raise ValueError("rho_increase_factor は 1 より大きい必要があります。")
+        if float(self.rho_decrease_factor) <= 1.0:
+            raise ValueError("rho_decrease_factor は 1 より大きい必要があります。")
+        if int(self.rho_update_interval) <= 0:
+            raise ValueError("rho_update_interval は正の整数である必要があります。")
+        if float(self.rho_min) <= 0.0 or float(self.rho_max) < float(self.rho_min):
+            raise ValueError("rho_min/rho_max の範囲が不正です。")
 
         def diff_beta(beta_matrix: np.ndarray) -> np.ndarray:
             if diff_len == 0 or n_penalized == 0:
@@ -212,7 +268,7 @@ class FusedLassoADMMSolver:
                 return float(np.inf)
             if n_penalized > 0 and diff_len > 0:
                 residual = diff_beta(beta_mat) - z_mat + u_mat
-                base += 0.5 * float(self.rho) * float(np.sum(residual * residual))
+                base += 0.5 * rho_current * float(np.sum(residual * residual))
             return base
 
         # 初期値: z は Dbeta の値、u はゼロで開始する。
@@ -242,6 +298,11 @@ class FusedLassoADMMSolver:
             "dual_residual": [],
             # ADMM ペナルティ係数 ρ（適応化する場合は更新後の値）
             "rho": [],
+            # 当該反復後の rho と更新方向。
+            "rho_next": [],
+            "rho_update": [],
+            # rho balancing を評価した契機（通常周期または停滞回避）。
+            "rho_update_trigger": [],
             # Boyd 型の停止判定で使う許容誤差（絶対 + 相対）
             "primal_tolerance": [],
             "dual_tolerance": [],
@@ -397,7 +458,7 @@ class FusedLassoADMMSolver:
                     residual = diff_beta(beta) - z + u
                     dtr = d_transpose(residual)
                     for idx, col in enumerate(penalized_cols):
-                        g_beta_mat[:, col] += self.rho * dtr[idx]
+                        g_beta_mat[:, col] += rho_current * dtr[idx]
 
                 # H_bb をフル行列に整形
                 h_bb_arr = np.asarray(h_bb, dtype=float)
@@ -423,7 +484,7 @@ class FusedLassoADMMSolver:
                 if n_penalized > 0 and diff_len > 0:
                     for col in penalized_cols:
                         idx = np.arange(K) * n_beta + col
-                        h_full[np.ix_(idx, idx)] += self.rho * dtd
+                        h_full[np.ix_(idx, idx)] += rho_current * dtd
 
                 beta_old = beta.copy()
                 beta_ref_value = beta_augmented_value(beta_old, gamma, z, u)
@@ -508,7 +569,7 @@ class FusedLassoADMMSolver:
             z_prev = z.copy()
             if n_penalized > 0 and diff_len > 0:
                 d_beta = diff_beta(beta)
-                z = soft_threshold(d_beta + u, lambda_fuse_effective / self.rho)
+                z = soft_threshold(d_beta + u, lambda_fuse_effective / rho_current)
                 u = u + d_beta - z
             else:
                 d_beta = diff_beta(beta)
@@ -517,12 +578,12 @@ class FusedLassoADMMSolver:
             if n_penalized > 0 and diff_len > 0:
                 primal_residual = float(np.linalg.norm(d_beta - z))
                 dual_step = d_transpose(z - z_prev)
-                dual_residual = float(self.rho * np.linalg.norm(dual_step))
+                dual_residual = float(rho_current * np.linalg.norm(dual_step))
                 primal_scale = max(
                     float(np.linalg.norm(d_beta)),
                     float(np.linalg.norm(z)),
                 )
-                dual_scale = float(self.rho * np.linalg.norm(d_transpose(u)))
+                dual_scale = float(rho_current * np.linalg.norm(d_transpose(u)))
                 primal_tolerance = np.sqrt(float(z.size)) * tol_abs_primal
                 primal_tolerance += tol_rel * primal_scale
                 dual_tolerance = np.sqrt(float(beta.size)) * tol_abs_dual
@@ -552,13 +613,16 @@ class FusedLassoADMMSolver:
             history["neg_loglik"].append(base_value)
             history["primal_residual"].append(primal_residual)
             history["dual_residual"].append(dual_residual)
-            history["rho"].append(float(self.rho))
+            history["rho"].append(float(rho_current))
             history["primal_tolerance"].append(float(primal_tolerance))
             history["dual_tolerance"].append(float(dual_tolerance))
             history["objective_relative_change"].append(objective_relative_change)
             history["newton_steps"].append(int(newton_steps))
             history["beta_step_norm"].append(beta_step_norm)
             history["gamma_step_norm"].append(gamma_step_norm)
+            history["rho_next"].append(float(rho_current))
+            history["rho_update"].append("none")
+            history["rho_update_trigger"].append("none")
 
             if np.isfinite(total_objective) and total_objective < best_objective:
                 best_objective = float(total_objective)
@@ -589,21 +653,103 @@ class FusedLassoADMMSolver:
             ):
                 stopping_reason = "residual_converged"
                 break
+            # 停止許容誤差で正規化した residual balancing。scaled dual 変数 u は
+            # rho の変更前後で unscaled dual が不変になるよう補正する。
+            # 適応更新を停滞停止より先に行い、rho が変わった場合は新しい拡大罰則の
+            # 下で反復を継続できるよう停滞カウントをリセットする。通常の更新周期外で
+            # 停滞上限へ達した場合も一度 balancing を試し、次の周期更新直前での
+            # 早期停止を避ける。
+            interval_rho_update_due = (
+                (admm_iter + 1) % int(self.rho_update_interval) == 0
+            )
+            stagnation_rho_escape_due = (
+                stagnation_count >= stagnation_patience
+            )
+            rho_update_due = (
+                interval_rho_update_due or stagnation_rho_escape_due
+            )
+            should_update_rho = (
+                bool(self.adaptive_rho)
+                and rho_update_due
+                and (admm_iter + 1) < int(self.max_admm_iter)
+            )
+            if should_update_rho:
+                rho_update_trigger = (
+                    "interval"
+                    if interval_rho_update_due
+                    else "stagnation_escape"
+                )
+                rho_old = rho_current
+                rho_update = _rho_balance_action(
+                    primal_residual=primal_residual,
+                    dual_residual=dual_residual,
+                    primal_tolerance=primal_tolerance,
+                    dual_tolerance=dual_tolerance,
+                    mu=float(self.rho_balance_mu),
+                )
+                if rho_update == "increase":
+                    rho_current = min(
+                        rho_old * float(self.rho_increase_factor),
+                        float(self.rho_max),
+                    )
+                elif rho_update == "decrease":
+                    rho_current = max(
+                        rho_old / float(self.rho_decrease_factor),
+                        float(self.rho_min),
+                    )
+                if rho_current != rho_old:
+                    u *= rho_old / rho_current
+                    stagnation_count = 0
+                    history["stagnation_count"][-1] = 0
+                else:
+                    rho_update = "none"
+                history["rho_next"][-1] = float(rho_current)
+                history["rho_update"][-1] = rho_update
+                history["rho_update_trigger"][-1] = rho_update_trigger
+
             if stagnation_count >= stagnation_patience:
                 stopping_reason = "stagnated"
                 break
 
-        if bool(self.return_best_iterate) and np.isfinite(best_objective):
+        terminal_iter = len(history["objective"]) - 1
+        converged = bool(
+            stopping_reason == "residual_converged"
+            and terminal_iter >= 0
+            and history["primal_residual"][terminal_iter]
+            <= history["primal_tolerance"][terminal_iter]
+            and history["dual_residual"][terminal_iter]
+            <= history["dual_tolerance"][terminal_iter]
+        )
+
+        # 正式収束時は必ず収束反復を返す。未収束時の best iterate は、少なくとも
+        # 一度評価済みの反復だけを候補にし、初期値を推定結果として返さない。
+        if converged:
+            beta_out = beta
+            gamma_out = gamma
+            z_out = z
+            u_out = u
+            returned_iter = terminal_iter
+            returned_from = "converged_iterate"
+            used_best_iterate = False
+        elif (
+            bool(self.return_best_iterate)
+            and best_iter >= 0
+            and np.isfinite(best_objective)
+        ):
             beta_out = best_beta
             gamma_out = best_gamma
             z_out = best_z
             u_out = best_u
+            returned_iter = int(best_iter)
+            returned_from = "best_iterate"
             used_best_iterate = True
         else:
             beta_out = beta
             gamma_out = gamma
             z_out = z
             u_out = u
+            returned_iter = terminal_iter if terminal_iter >= 0 else None
+            returned_from = "last_iterate"
             used_best_iterate = False
 
         history["best_objective"] = (
@@ -614,10 +760,33 @@ class FusedLassoADMMSolver:
         history["lambda_fuse_effective"] = lambda_fuse_effective
         history["best_iter"] = int(best_iter) if best_iter >= 0 else None
         history["used_best_iterate"] = used_best_iterate
+        history["returned_iter"] = returned_iter
+        history["returned_from"] = returned_from
         history["stopped_due_to_invalid"] = bool(stopped_due_to_invalid)
         if stopped_due_to_invalid:
             stopping_reason = "invalid_state"
         history["stopping_reason"] = stopping_reason
         history["n_admm_iter"] = int(len(history["objective"]))
+        history["converged"] = converged
+        history["bic_eligible"] = converged
+        history["rho_final"] = float(rho_current)
+
+        returned_metric_keys = (
+            "objective",
+            "neg_loglik",
+            "primal_residual",
+            "dual_residual",
+            "primal_tolerance",
+            "dual_tolerance",
+            "rho",
+        )
+        for key in returned_metric_keys:
+            values = history[key]
+            value = (
+                values[returned_iter]
+                if returned_iter is not None and 0 <= returned_iter < len(values)
+                else None
+            )
+            history[f"returned_{key}"] = value
 
         return beta_out, gamma_out, z_out, u_out, history

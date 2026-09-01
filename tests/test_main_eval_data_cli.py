@@ -125,3 +125,12 @@ def test_main_eval_data_cli(tmp_path: Path) -> None:
     assert payload["summary"]["lambda_fuse_effective"] == 0.1 * X_train.shape[0]
     assert payload["summary"]["c_td_train"] is not None
     assert payload["summary"]["c_td_test"] is not None
+    returned_iter = payload["summary"]["returned_iter"]
+    assert returned_iter is not None
+    assert payload["summary"]["returned_neg_loglik"] == payload["history"][
+        "neg_loglik"
+    ][returned_iter]
+    assert payload["summary"]["returned_primal_residual"] == payload["history"][
+        "primal_residual"
+    ][returned_iter]
+    assert payload["summary"]["bic_eligible"] is False

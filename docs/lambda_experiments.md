@@ -20,6 +20,7 @@ lambda_fuseパラメータを変えながら複数のデータセットで並列
 
 - **`run_lambda_experiment.sh`**: SGE_TASK_IDに基づいて実験を実行
   - データファイルとlambda値の組み合わせを自動選択
+  - 同名の独立評価データを `--eval-data` で指定
   - 各実験用の一時configを生成（lambda_fuseを上書き）
   - 結果を構造化されたディレクトリに保存
 
@@ -85,6 +86,18 @@ outputs/lambda_experiments/
 
 ## 使い方
 
+### 0. 学習・独立評価データの生成
+
+```bash
+uv run generation/generate_extended_aft_step_datasets.py \
+  --output-dir data/extended_aft_step \
+  --eval-output-dir data/extended_aft_step_eval
+```
+
+両ディレクトリには同名のCSVが作られ、評価データには既定で
+`train seed + 100000` を使います。対応する評価CSVがない場合、
+`run_lambda_experiment.sh` は学習時評価へフォールバックせずエラー終了します。
+
 ### 1. Lambda値の準備
 
 ```bash
@@ -126,6 +139,10 @@ uv run scripts/aggregate_lambda_results.py \
   --output outputs/lambda_summary.csv
 ```
 
+BIC は、正式な Boyd 型残差判定を満たした `bic_eligible=true` の結果だけで
+計算します。`max_iter`、`stagnated`、`invalid_state` は結果JSONへ残しますが、
+モデル選択候補には含めません。候補がないデータセットではBIC選択不能として扱います。
+
 ### 5. 結果の可視化
 
 ```bash
@@ -158,14 +175,106 @@ uv run scripts/visualize_lambda_results.py \
 | lambda_fuse | Lambda値 |
 | lambda_fuse_effective | 最適化で使った実効値（n_samples * lambda_fuse） |
 | n_samples | サンプル数 |
+| n_eval_samples | 独立評価データのサンプル数 |
 | n_features | 特徴量数 |
 | objective_last | 最終目的関数値 |
+| returned_iter | `coef` と `z_last` が対応する0始まりの反復番号 |
+| returned_neg_loglik | 返却反復の負の対数尤度 |
+| returned_primal_residual | 返却反復のprimal残差 |
+| returned_dual_residual | 返却反復のdual残差 |
+| returned_primal_tolerance | 返却反復のprimal許容誤差 |
+| returned_dual_tolerance | 返却反復のdual許容誤差 |
+| converged | 正式な残差判定を満たしたか |
+| bic_eligible | BIC選択候補として使用できるか |
 | primal_residual_last | 最終primal残差 |
 | dual_residual_last | 最終dual残差 |
+| c_td | 独立評価データ上の time-dependent C-index |
+| c_td_train | 学習データ上の time-dependent C-index |
+| c_td_test | 独立評価データ上の time-dependent C-index |
+| n_change_points | `z_last` の非ゼロ要素数 |
+| n_params | `n_baseline_basis + n_features + n_change_points` |
+| bic | `2 * NLL + n_params * log(n_samples)` |
 | rho | ADMMペナルティ係数 |
 | max_admm_iter | ADMM最大反復数 |
 | clip_eta | exp(η)クリップ幅 |
 | result_path | 結果JSONの相対パス |
+
+## パイロット診断実験
+
+既存の `outputs/pilot` と分離して、Oracle・Fine-grid各3 seed、small lambda
+9点の54タスクを実行できます。既定設定は適応的rhoと
+`newton_steps_per_admm=5`です。
+
+```bash
+./scripts/pilot/submit_diagnostic.sh
+./scripts/pilot/aggregate_diagnostic.sh
+```
+
+出力先は
+`outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5/`
+です。
+集計後には `check_diagnostic.py` が54件の正式収束、返却残差、BIC候補、
+正則化経路の変化を検査し、不合格なら終了コード1を返します。
+
+適応的rhoは主・双対残差を各停止許容誤差で正規化して比較します。
+rhoを更新した反復では停滞カウントをリセットし、更新直後の早期停止を防ぎます。
+停滞上限へ達した場合は通常の更新周期外でも一度rho balancingを試し、rhoを
+変更できた場合は反復を継続します。rhoを変更できない場合だけ停滞停止します。
+固定rhoやNewtonステップ数を比較するときは、別のrun名を必ず指定して結果を分離します。
+
+```bash
+PILOT_DIAGNOSTIC_RUN=fixed_rho10_newton5 \
+DIAGNOSTIC_RHO=10 \
+DIAGNOSTIC_ADAPTIVE_RHO=false \
+DIAGNOSTIC_NEWTON_STEPS=5 \
+SGE_TASK_ID=1 \
+./scripts/pilot/run_diagnostic_task.sh
+```
+
+## 診断通過後の本パイロット
+
+第3次診断は54/54件で正式収束し、自動ゲートを通過しました。本パイロットは
+Oracle、Fine-grid、Off-grid、Small、No-changeを各20反復、9 lambdaで実行するため、
+合計タスク数は `5 * 20 * 9 = 900` です。
+
+既定値は、診断で合格した次の条件へ固定されています。
+
+- lambda: `0, 0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.25`
+- `adaptive_rho = true`
+- `newton_steps_per_admm = 5`
+- `rho_update_interval = 5`
+- 停滞時の周期外rho balancingを有効化
+
+リモートでデータを生成した後、次の順に実行します。
+
+```bash
+./scripts/pilot/generate_data.sh
+./scripts/pilot/submit.sh
+qstat
+./scripts/pilot/aggregate.sh
+uv run scripts/pilot/visualize_results.py
+```
+
+`submit.sh` は100個の学習CSVと100個の独立評価CSV、9個のlambdaを検証し、
+SGEアレイ範囲を `1-900` として動的に指定します。出力は旧パイロットを上書きせず、
+次へ保存されます。
+
+```text
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5/
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_summary.csv
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_gate.json
+outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_visualizations/
+```
+
+別名で再実行する場合は、投入・集計・可視化で同じ名前または明示パスを使います。
+
+```bash
+PILOT_RUN_NAME=my_run ./scripts/pilot/submit.sh
+PILOT_RUN_NAME=my_run ./scripts/pilot/aggregate.sh
+uv run scripts/pilot/visualize_results.py \
+  --summary outputs/pilot/my_run_summary.csv \
+  --output-dir outputs/pilot/my_run_visualizations
+```
 
 ## 設計のポイント
 

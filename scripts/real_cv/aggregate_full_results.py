@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,22 +14,17 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from admm.model_selection import (  # noqa: E402
+    compute_bic,
+    count_change_points,
+    effective_degrees_of_freedom,
+)
+
 
 def count_nonzero_z(z_last: Any, tol: float) -> int | None:
-    """z_last のうち |z| > tol の要素数を数える。"""
+    """後方互換用: z_last の非ゼロ差分数を返す。"""
 
-    if z_last is None:
-        return None
-
-    try:
-        total = 0
-        for row in z_last:
-            for value in row:
-                if abs(float(value)) > tol:
-                    total += 1
-        return total
-    except (TypeError, ValueError):
-        return None
+    return count_change_points(z_last, tol)
 
 
 def _parse_path_metadata(result_path: Path) -> tuple[str | None, float | None]:
@@ -80,19 +74,56 @@ def collect_results(base_dir: Path, z_tol: float = 1e-8) -> pd.DataFrame:
             and n_samples is not None
         ):
             lambda_fuse_effective = float(n_samples) * float(lambda_fuse)
-        n_params = count_nonzero_z(result.get("z_last"), z_tol)
+        z_last = result.get("z_last")
+        n_features = result.get("n_features")
+        n_change_points = count_change_points(z_last, z_tol)
+        n_params = effective_degrees_of_freedom(
+            n_baseline_basis=config.get("n_baseline_basis"),
+            n_features=n_features,
+            z=z_last,
+            z_tol=z_tol,
+        )
+        history = result.get("history", {})
         neg_loglik_last = summary.get("neg_loglik_last")
-
-        if (
-            neg_loglik_last is not None
-            and n_params is not None
-            and n_samples is not None
-        ):
-            bic = 2.0 * float(neg_loglik_last) + float(n_params) * math.log(
-                float(n_samples)
+        returned_neg_loglik = summary.get(
+            "returned_neg_loglik", history.get("returned_neg_loglik")
+        )
+        returned_primal_residual = summary.get(
+            "returned_primal_residual", history.get("returned_primal_residual")
+        )
+        returned_dual_residual = summary.get(
+            "returned_dual_residual", history.get("returned_dual_residual")
+        )
+        returned_primal_tolerance = summary.get(
+            "returned_primal_tolerance", history.get("returned_primal_tolerance")
+        )
+        returned_dual_tolerance = summary.get(
+            "returned_dual_tolerance", history.get("returned_dual_tolerance")
+        )
+        converged = bool(summary.get("converged", history.get("converged", False)))
+        residuals_ok = bool(
+            returned_primal_residual is not None
+            and returned_dual_residual is not None
+            and returned_primal_tolerance is not None
+            and returned_dual_tolerance is not None
+            and returned_primal_residual <= returned_primal_tolerance
+            and returned_dual_residual <= returned_dual_tolerance
+        )
+        bic_eligible = bool(
+            summary.get("bic_eligible", history.get("bic_eligible", False))
+            and converged
+            and residuals_ok
+            and returned_neg_loglik is not None
+        )
+        bic = (
+            compute_bic(
+                neg_loglik=returned_neg_loglik,
+                n_samples=n_samples,
+                degrees_of_freedom=n_params,
             )
-        else:
-            bic = None
+            if bic_eligible
+            else None
+        )
 
         rows.append(
             {
@@ -100,15 +131,26 @@ def collect_results(base_dir: Path, z_tol: float = 1e-8) -> pd.DataFrame:
                 "lambda_fuse": lambda_fuse,
                 "lambda_fuse_effective": lambda_fuse_effective,
                 "n_samples": n_samples,
-                "n_features": result.get("n_features"),
+                "n_features": n_features,
                 "objective_last": summary.get("objective_last"),
                 "neg_loglik_last": neg_loglik_last,
+                "returned_neg_loglik": returned_neg_loglik,
                 "primal_residual_last": summary.get("primal_residual_last"),
                 "dual_residual_last": summary.get("dual_residual_last"),
+                "returned_primal_residual": returned_primal_residual,
+                "returned_dual_residual": returned_dual_residual,
+                "returned_primal_tolerance": returned_primal_tolerance,
+                "returned_dual_tolerance": returned_dual_tolerance,
                 "stopping_reason": summary.get("stopping_reason"),
                 "n_admm_iter": summary.get("n_admm_iter"),
+                "returned_iter": summary.get(
+                    "returned_iter", history.get("returned_iter")
+                ),
+                "converged": converged,
+                "bic_eligible": bic_eligible,
                 "c_td": summary.get("c_td"),
                 "c_td_train": summary.get("c_td_train"),
+                "n_change_points": n_change_points,
                 "n_params": n_params,
                 "bic": bic,
                 "rho": config.get("rho"),

@@ -210,12 +210,14 @@ fit の `result.json` は主に次を持ちます。
 - `primal_residual_last`
 - `dual_residual_last`
 - `c_td`
-- `n_params`: `z_last` の非ゼロ数
+- `c_td_train`, `c_td_test`
+- `n_change_points`: `z_last` の非ゼロ数
+- `n_params`: `n_baseline_basis + n_features + n_change_points`
 - `bic`
 - `rho`, `max_admm_iter`, `clip_eta`
 - `result_path`
 
-BIC は `n_params` と `neg_loglik_last` から計算します。`z_tol` の既定は `1e-8` です。
+BIC は `2 * neg_loglik_last + n_params * log(n_samples)` で計算します。`z_tol` の既定は `1e-8` です。
 
 ## Cox 比較
 

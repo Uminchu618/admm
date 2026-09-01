@@ -1,0 +1,17 @@
+{
+  "passed": false,
+  "rows": 54,
+  "datasets": 6,
+  "lambdas": 9,
+  "converged_rows": 39,
+  "bic_eligible_rows": 39,
+  "checks": {
+    "complete": true,
+    "all_formally_converged": false,
+    "all_returned_residuals_within_tolerance": false,
+    "no_missing_returned_iter": true,
+    "no_initial_fallback": true,
+    "every_dataset_has_bic_candidate": true,
+    "regularization_path_changes": true
+  }
+}

@@ -19,6 +19,8 @@ class WeibullBaseline:
 
 @dataclass
 class StepwiseBetaParams:
+    """データ生成に用いる真の区分一定係数を定義する。"""
+
     time_grid: List[float]
     beta1_levels: List[float]
     beta2_levels: List[float]
@@ -68,13 +70,35 @@ class ExtendedAFTStepGenerator:
         censoring: CensoringParams,
         grid: GridParams,
         interval_covariates: IntervalCovariatesParams,
+        analysis_time_grid: List[float] | None = None,
         seed: int = 42,
     ):
         if x23_dist not in ("normal", "uniform"):
             raise ValueError("x23_dist must be 'normal' or 'uniform'")
         step_params.validate()
-        if grid.t_max < step_params.time_grid[-1]:
-            raise ValueError("grid.t_max must be >= last time_grid point")
+        if analysis_time_grid is None:
+            analysis_time_grid = list(step_params.time_grid)
+        if len(analysis_time_grid) < 2:
+            raise ValueError("analysis_time_grid must have at least 2 points")
+        if any(
+            t2 <= t1
+            for t1, t2 in zip(analysis_time_grid[:-1], analysis_time_grid[1:])
+        ):
+            raise ValueError("analysis_time_grid must be strictly increasing")
+        if not np.isclose(analysis_time_grid[0], step_params.time_grid[0]) or not np.isclose(
+            analysis_time_grid[-1], step_params.time_grid[-1]
+        ):
+            raise ValueError(
+                "analysis_time_grid and true time_grid must have the same endpoints"
+            )
+        if grid.t_max < max(step_params.time_grid[-1], analysis_time_grid[-1]):
+            raise ValueError(
+                "grid.t_max must be >= last true and analysis time-grid point"
+            )
+        if censoring.admin_time > analysis_time_grid[-1]:
+            raise ValueError(
+                "censoring.admin_time must be <= last analysis_time_grid point"
+            )
         self.n = n
         self.x23_dist = x23_dist
         self.baseline = baseline
@@ -82,7 +106,20 @@ class ExtendedAFTStepGenerator:
         self.censoring = censoring
         self.grid = grid
         self.interval_covariates = interval_covariates
+        self.analysis_time_grid = list(map(float, analysis_time_grid))
         self.seed = seed
+
+    def metadata(self) -> Dict[str, List[float]]:
+        """推定用グリッドと真値グリッドを再現可能な形で返す。"""
+
+        true_time_grid = list(map(float, self.step_params.time_grid))
+        analysis_time_grid = list(self.analysis_time_grid)
+        return {
+            # main.py が解析グリッドとして読む既存キー。
+            "time_grid": analysis_time_grid,
+            "analysis_time_grid": analysis_time_grid,
+            "true_time_grid": true_time_grid,
+        }
 
     def _piecewise_beta(self, t: np.ndarray, levels: List[float]) -> np.ndarray:
         # intervals: [t_{k-1}, t_k)
@@ -119,7 +156,9 @@ class ExtendedAFTStepGenerator:
     def expand_interval_covariates(
         self, x1: np.ndarray, x2: np.ndarray, x3: np.ndarray
     ) -> np.ndarray:
-        k = len(self.step_params.time_grid) - 1
+        # long format の区間数は推定モデルの解析グリッドに合わせる。
+        # 真の係数関数は _piecewise_beta() が step_params.time_grid で評価する。
+        k = len(self.analysis_time_grid) - 1
         base = np.stack([x1, x2, x3], axis=1)
         base = base[:, None, :]
         base = np.repeat(base, k, axis=1)
@@ -204,8 +243,15 @@ def build_generator(cfg: Dict) -> ExtendedAFTStepGenerator:
     interval_cfg = cfg.get("interval_covariates", {})
 
     baseline = WeibullBaseline(alpha=baseline_cfg["alpha"], rho=baseline_cfg["rho"])
+    true_time_grid = step_cfg.get("true_time_grid", step_cfg.get("time_grid"))
+    if true_time_grid is None:
+        raise ValueError(
+            "stepwise_beta.true_time_grid (or legacy time_grid) is required"
+        )
+    analysis_time_grid = cfg.get("analysis_time_grid", true_time_grid)
+
     step_params = StepwiseBetaParams(
-        time_grid=step_cfg["time_grid"],
+        time_grid=true_time_grid,
         beta1_levels=step_cfg["beta1_levels"],
         beta2_levels=step_cfg["beta2_levels"],
         beta3_levels=step_cfg["beta3_levels"],
@@ -233,6 +279,7 @@ def build_generator(cfg: Dict) -> ExtendedAFTStepGenerator:
         censoring=censoring,
         grid=grid,
         interval_covariates=interval_covariates,
+        analysis_time_grid=analysis_time_grid,
         seed=cfg.get("seed", 42),
     )
 
@@ -261,7 +308,7 @@ def main() -> None:
     df.to_csv(args.output, index=False)
     meta_path = f"{args.output}.meta.json"
     with open(meta_path, "w", encoding="utf-8") as handle:
-        json.dump({"time_grid": generator.step_params.time_grid}, handle, indent=2)
+        json.dump(generator.metadata(), handle, indent=2)
     print(f"生成データを {args.output} に保存しました。")
 
 

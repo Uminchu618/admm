@@ -62,6 +62,7 @@ def collect_results(base_dir: Path) -> pd.DataFrame:
         path_lambda, path_fold = _parse_path_metadata(result_path)
         path_dataset = _parse_dataset(result_path)
         summary = result.get("summary", {})
+        history = result.get("history", {})
         config = result.get("config", {})
         lambda_fuse = config.get("lambda_fuse", path_lambda)
         n_train = result.get("n_samples")
@@ -95,8 +96,31 @@ def collect_results(base_dir: Path) -> pd.DataFrame:
                 "neg_loglik_last": summary.get("neg_loglik_last"),
                 "primal_residual_last": summary.get("primal_residual_last"),
                 "dual_residual_last": summary.get("dual_residual_last"),
+                "primal_tolerance_last": summary.get("primal_tolerance_last"),
+                "dual_tolerance_last": summary.get("dual_tolerance_last"),
                 "stopping_reason": summary.get("stopping_reason"),
                 "n_admm_iter": summary.get("n_admm_iter"),
+                "returned_iter": summary.get(
+                    "returned_iter", history.get("returned_iter")
+                ),
+                "returned_primal_residual": summary.get(
+                    "returned_primal_residual",
+                    history.get("returned_primal_residual"),
+                ),
+                "returned_dual_residual": summary.get(
+                    "returned_dual_residual", history.get("returned_dual_residual")
+                ),
+                "returned_primal_tolerance": summary.get(
+                    "returned_primal_tolerance",
+                    history.get("returned_primal_tolerance"),
+                ),
+                "returned_dual_tolerance": summary.get(
+                    "returned_dual_tolerance",
+                    history.get("returned_dual_tolerance"),
+                ),
+                "converged": bool(
+                    summary.get("converged", history.get("converged", False))
+                ),
                 "result_path": str(result_path),
             }
         )
@@ -110,8 +134,25 @@ def summarize_by_lambda(fold_df: pd.DataFrame) -> pd.DataFrame:
     if fold_df.empty:
         return fold_df
 
+    eligible = fold_df.loc[fold_df["converged"].fillna(False)].copy()
+    if eligible.empty:
+        return pd.DataFrame(
+            columns=[
+                "lambda_fuse",
+                "n_folds",
+                "c_td_test_mean",
+                "c_td_test_std",
+                "c_td_train_mean",
+                "c_td_train_std",
+                "objective_last_mean",
+                "primal_residual_last_mean",
+                "dual_residual_last_mean",
+                "c_td_test_se",
+            ]
+        )
+
     grouped = (
-        fold_df.groupby("lambda_fuse", dropna=False)
+        eligible.groupby("lambda_fuse", dropna=False)
         .agg(
             n_folds=("fold", "count"),
             c_td_test_mean=("c_td_test", "mean"),

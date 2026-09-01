@@ -11,27 +11,68 @@
 
 import argparse
 import json
-import math
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from admm.model_selection import (
+    compute_bic,
+    count_change_points,
+    effective_degrees_of_freedom,
+)
+
 
 def count_nonzero_z(z_last: Any, tol: float) -> Optional[int]:
-    """z_lastのうち|z|>tolの要素数を数える"""
-    if z_last is None:
-        return None
+    """後方互換用: z_last の非ゼロ差分数を返す。"""
 
+    return count_change_points(z_last, tol)
+
+
+def _returned_history_value(
+    summary: Dict[str, Any],
+    history: Dict[str, Any],
+    key: str,
+    returned_iter: Optional[int],
+) -> Any:
+    """返却反復の指標を読み、旧形式では履歴配列から安全に復元する。"""
+
+    explicit = summary.get(f"returned_{key}", history.get(f"returned_{key}"))
+    if explicit is not None:
+        return explicit
+    values = history.get(key)
+    if (
+        isinstance(values, list)
+        and returned_iter is not None
+        and 0 <= returned_iter < len(values)
+    ):
+        return values[returned_iter]
+    return None
+
+
+def _formal_convergence(
+    summary: Dict[str, Any], history: Dict[str, Any]
+) -> bool:
+    """新形式のフラグを優先し、旧形式は最終残差から厳密に判定する。"""
+
+    reported = summary.get("converged", history.get("converged"))
+    if reported is not None:
+        return bool(reported)
+    if summary.get("stopping_reason", history.get("stopping_reason")) != (
+        "residual_converged"
+    ):
+        return False
     try:
-        total = 0
-        for row in z_last:
-            for value in row:
-                if abs(float(value)) > tol:
-                    total += 1
-        return total
-    except (TypeError, ValueError):
-        return None
+        return bool(
+            history["primal_residual"][-1] <= history["primal_tolerance"][-1]
+            and history["dual_residual"][-1] <= history["dual_tolerance"][-1]
+        )
+    except (KeyError, IndexError, TypeError):
+        return False
 
 
 def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
@@ -59,6 +100,23 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
             lambda_str = lambda_dir.replace("lambda_", "")
 
             z_last = result.get("z_last")
+            summary = result.get("summary", {})
+            config = result.get("config", {})
+            history = result.get("history", {})
+            returned_iter = summary.get("returned_iter", history.get("returned_iter"))
+            if returned_iter is None:
+                if history.get("used_best_iterate"):
+                    returned_iter = history.get("best_iter")
+                elif isinstance(history.get("objective"), list) and history["objective"]:
+                    returned_iter = len(history["objective"]) - 1
+            n_features = result.get("n_features")
+            n_change_points = count_change_points(z_last, z_tol)
+            n_params = effective_degrees_of_freedom(
+                n_baseline_basis=config.get("n_baseline_basis"),
+                n_features=n_features,
+                z=z_last,
+                z_tol=z_tol,
+            )
 
             row = {
                 "data_name": data_dir,
@@ -68,40 +126,81 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
                     result.get("history", {}).get("lambda_fuse_effective"),
                 ),
                 "n_samples": result.get("n_samples"),
-                "n_features": result.get("n_features"),
-                "objective_last": result.get("summary", {}).get("objective_last"),
-                "neg_loglik_last": result.get("summary", {}).get("neg_loglik_last"),
-                "primal_residual_last": result.get("summary", {}).get(
-                    "primal_residual_last"
+                "n_eval_samples": result.get("n_eval_samples"),
+                "n_features": n_features,
+                "objective_last": summary.get("objective_last"),
+                "neg_loglik_last": summary.get("neg_loglik_last"),
+                "primal_residual_last": summary.get("primal_residual_last"),
+                "dual_residual_last": summary.get("dual_residual_last"),
+                "primal_tolerance_last": summary.get("primal_tolerance_last"),
+                "dual_tolerance_last": summary.get("dual_tolerance_last"),
+                "returned_iter": returned_iter,
+                "returned_from": summary.get(
+                    "returned_from", history.get("returned_from")
                 ),
-                "dual_residual_last": result.get("summary", {}).get(
-                    "dual_residual_last"
+                "returned_objective": _returned_history_value(
+                    summary, history, "objective", returned_iter
                 ),
-                "c_td": result.get("summary", {}).get("c_td"),
-                "n_params": count_nonzero_z(z_last, z_tol),
+                "returned_neg_loglik": _returned_history_value(
+                    summary, history, "neg_loglik", returned_iter
+                ),
+                "returned_primal_residual": _returned_history_value(
+                    summary, history, "primal_residual", returned_iter
+                ),
+                "returned_dual_residual": _returned_history_value(
+                    summary, history, "dual_residual", returned_iter
+                ),
+                "returned_primal_tolerance": _returned_history_value(
+                    summary, history, "primal_tolerance", returned_iter
+                ),
+                "returned_dual_tolerance": _returned_history_value(
+                    summary, history, "dual_tolerance", returned_iter
+                ),
+                "stopping_reason": summary.get(
+                    "stopping_reason", history.get("stopping_reason")
+                ),
+                "n_admm_iter": summary.get(
+                    "n_admm_iter", history.get("n_admm_iter")
+                ),
+                "c_td": summary.get("c_td"),
+                "c_td_train": summary.get("c_td_train"),
+                "c_td_test": summary.get("c_td_test"),
+                "n_change_points": n_change_points,
+                "n_params": n_params,
                 "result_path": str(result_path.relative_to(base_dir.parent.parent)),
             }
 
-            loglik = row["neg_loglik_last"]
-            if loglik is not None:
-                loglik = -float(loglik)
-
-            if loglik is None and row["objective_last"] is not None:
-                loglik = -float(row["objective_last"])
-
-            if (
-                loglik is not None
-                and row["n_params"] is not None
-                and row["n_samples"] is not None
-            ):
-                row["bic"] = -2.0 * loglik + float(row["n_params"]) * math.log(
-                    float(row["n_samples"])
+            converged = _formal_convergence(summary, history)
+            returned_residuals_ok = bool(
+                row["returned_primal_residual"] is not None
+                and row["returned_dual_residual"] is not None
+                and row["returned_primal_tolerance"] is not None
+                and row["returned_dual_tolerance"] is not None
+                and row["returned_primal_residual"]
+                <= row["returned_primal_tolerance"]
+                and row["returned_dual_residual"] <= row["returned_dual_tolerance"]
+            )
+            row["converged"] = converged
+            reported_bic_eligible = summary.get(
+                "bic_eligible", history.get("bic_eligible")
+            )
+            row["bic_eligible"] = bool(
+                (converged if reported_bic_eligible is None else reported_bic_eligible)
+                and converged
+                and returned_residuals_ok
+                and row["returned_neg_loglik"] is not None
+            )
+            row["bic"] = (
+                compute_bic(
+                    neg_loglik=row["returned_neg_loglik"],
+                    n_samples=row["n_samples"],
+                    degrees_of_freedom=row["n_params"],
                 )
-            else:
-                row["bic"] = None
+                if row["bic_eligible"]
+                else None
+            )
 
             # configから主要なハイパーパラメータも記録
-            config = result.get("config", {})
             row["rho"] = config.get("rho")
             row["max_admm_iter"] = config.get("max_admm_iter")
             row["clip_eta"] = config.get("clip_eta")
@@ -184,6 +283,7 @@ def main() -> None:
                 "lambda_fuse",
                 "objective_last",
                 "primal_residual_last",
+                "n_change_points",
                 "n_params",
             ]
         ].head(5)

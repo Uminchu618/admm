@@ -354,18 +354,50 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     last_dr = (
         model.history_["dual_residual"][-1] if model.history_["dual_residual"] else None
     )
+    last_pr_tol = (
+        model.history_["primal_tolerance"][-1]
+        if model.history_["primal_tolerance"]
+        else None
+    )
+    last_dr_tol = (
+        model.history_["dual_tolerance"][-1]
+        if model.history_["dual_tolerance"]
+        else None
+    )
     stopping_reason = model.history_.get("stopping_reason")
     n_admm_iter = model.history_.get("n_admm_iter", len(model.history_["objective"]))
     lambda_fuse_scale = model.history_.get("lambda_fuse_scale")
     lambda_fuse_effective = model.history_.get("lambda_fuse_effective")
+    returned_iter = model.history_.get("returned_iter")
+    returned_from = model.history_.get("returned_from")
+    converged = bool(model.history_.get("converged", False))
+    bic_eligible = bool(model.history_.get("bic_eligible", False))
+    returned_metrics = {
+        key: model.history_.get(f"returned_{key}")
+        for key in (
+            "objective",
+            "neg_loglik",
+            "primal_residual",
+            "dual_residual",
+            "primal_tolerance",
+            "dual_tolerance",
+            "rho",
+        )
+    }
     print(
         {
             "objective": last_obj,
             "neg_loglik": last_neg_loglik,
             "primal_residual": last_pr,
             "dual_residual": last_dr,
+            "primal_tolerance": last_pr_tol,
+            "dual_tolerance": last_dr_tol,
             "stopping_reason": stopping_reason,
             "n_admm_iter": n_admm_iter,
+            "returned_iter": returned_iter,
+            "returned_from": returned_from,
+            "converged": converged,
+            "bic_eligible": bic_eligible,
             "lambda_fuse_scale": lambda_fuse_scale,
             "lambda_fuse_effective": lambda_fuse_effective,
             "c_td": c_td,
@@ -419,8 +451,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "primal_tolerance_last": last_pr_tol,
+                "dual_tolerance_last": last_dr_tol,
                 "stopping_reason": stopping_reason,
                 "n_admm_iter": n_admm_iter,
+                "returned_iter": returned_iter,
+                "returned_from": returned_from,
+                "returned_objective": returned_metrics["objective"],
+                "returned_neg_loglik": returned_metrics["neg_loglik"],
+                "returned_primal_residual": returned_metrics["primal_residual"],
+                "returned_dual_residual": returned_metrics["dual_residual"],
+                "returned_primal_tolerance": returned_metrics["primal_tolerance"],
+                "returned_dual_tolerance": returned_metrics["dual_tolerance"],
+                "returned_rho": returned_metrics["rho"],
+                "converged": converged,
+                "bic_eligible": bic_eligible,
                 "lambda_fuse_scale": lambda_fuse_scale,
                 "lambda_fuse_effective": lambda_fuse_effective,
                 "c_td": c_td,
@@ -442,8 +487,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "neg_loglik_last": last_neg_loglik,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
+                "primal_tolerance_last": last_pr_tol,
+                "dual_tolerance_last": last_dr_tol,
                 "stopping_reason": stopping_reason,
                 "n_admm_iter": n_admm_iter,
+                "returned_iter": returned_iter,
+                "returned_from": returned_from,
+                "returned_objective": returned_metrics["objective"],
+                "returned_neg_loglik": returned_metrics["neg_loglik"],
+                "returned_primal_residual": returned_metrics["primal_residual"],
+                "returned_dual_residual": returned_metrics["dual_residual"],
+                "returned_primal_tolerance": returned_metrics["primal_tolerance"],
+                "returned_dual_tolerance": returned_metrics["dual_tolerance"],
+                "returned_rho": returned_metrics["rho"],
+                "converged": converged,
+                "bic_eligible": bic_eligible,
                 "lambda_fuse_scale": lambda_fuse_scale,
                 "lambda_fuse_effective": lambda_fuse_effective,
                 "c_td": c_td,

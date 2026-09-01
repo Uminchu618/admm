@@ -1,0 +1,37 @@
+time_grid = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+baseline_basis = "bspline"
+n_baseline_basis = 8
+baseline_knot_margin = 1.1
+
+# run_diagnostic_task.sh がタスクごとに上書きする。
+lambda_fuse = 0.0
+rho = 1.0
+max_admm_iter = 1000
+admm_tol_primal = 1e-4
+admm_tol_dual = 1e-4
+admm_tol_rel = 1e-3
+admm_stagnation_tol = 1e-10
+admm_stagnation_patience = 10
+
+newton_steps_per_admm = 5
+max_newton_iter = 50
+newton_tol = 1e-6
+line_search_max_steps = 12
+line_search_shrink = 0.5
+line_search_c1 = 1e-4
+return_best_iterate = true
+
+adaptive_rho = true
+rho_balance_mu = 10.0
+rho_increase_factor = 2.0
+rho_decrease_factor = 2.0
+rho_update_interval = 5
+rho_min = 1e-6
+rho_max = 1e6
+
+clip_eta = 20
+random_state = 1234
+
+[quadrature]
+Q = 5
+rule = "gauss_legendre"
