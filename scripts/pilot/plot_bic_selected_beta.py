@@ -284,7 +284,7 @@ def write_report(records: pd.DataFrame, scenarios: list[str], output_path: Path)
     lines = [
         "# BIC選択係数関数と真値の比較",
         "",
-        "黒破線が生成時の真値、色付き実線が正式収束した候補のうちBIC最小の推定値である。",
+        "黒破線が生成時の真値、色付き実線が収束判定を満たした候補のうちBIC最小の推定値である。",
         "各行はseed、各列は係数を表し、右列に選択lambdaと係数RMISEを示す。",
         "",
     ]

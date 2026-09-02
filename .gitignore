@@ -26,3 +26,8 @@ wheels/
 
 /outputs/pilot
 /outputs/pilot_diagnostic
+/outputs/pilot_cv
+outputs/pilot_cv_refit
+outputs/pilot_cv
+
+/outputs/pilot_cv.tar.zst
