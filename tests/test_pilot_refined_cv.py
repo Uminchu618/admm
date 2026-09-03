@@ -119,6 +119,54 @@ def test_aggregate_refined_cv_selects_best_eligible_lambda(tmp_path: Path) -> No
     assert (output_dir / "oracle_seed_42" / "selected_lambda.json").is_file()
 
 
+def test_aggregate_refined_cv_allows_missing_candidates(tmp_path: Path) -> None:
+    selections = pd.DataFrame(
+        {"data_name": ["oracle_seed_42"], "selected_lambda": [0.03]}
+    )
+    grid_table = build_grid_table(selections, COARSE_GRID)
+    grid_path = tmp_path / "refined_grid.csv"
+    grid_table.to_csv(grid_path, index=False)
+    additions_dir = tmp_path / "additions"
+
+    for fold in range(5):
+        path = result_path(additions_dir, "oracle_seed_42", 0.03, fold)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "n_samples": 800,
+                    "n_eval_samples": 200,
+                    "n_features": 3,
+                    "summary": {
+                        "c_td_train": 0.71,
+                        "c_td_test": 0.70,
+                        "objective_last": 100.0,
+                        "primal_residual_last": 0.0,
+                        "dual_residual_last": 0.0,
+                        "converged": True,
+                    },
+                    "config": {"lambda_fuse": 0.03},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    selected, audit = aggregate_refined_cv(
+        coarse_base_dir=tmp_path / "coarse",
+        additions_base_dir=additions_dir,
+        grid_path=grid_path,
+        output_dir=tmp_path / "aggregated",
+        n_folds=5,
+        tie_tolerance=1e-12,
+    )
+
+    assert selected.iloc[0]["selected_lambda"] == 0.03
+    assert audit.iloc[0]["eligible_lambdas"] == 1
+    assert audit.iloc[0]["ineligible_lambdas"] == 20
+    assert audit.iloc[0]["status"] == "selected_with_exclusions"
+    assert bool(audit.iloc[0]["selection_neighbor_ineligible"])
+
+
 def test_pair_methods_computes_refined_minus_coarse_and_excludes_failed_refit() -> None:
     records = pd.DataFrame(
         [

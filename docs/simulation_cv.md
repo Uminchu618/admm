@@ -114,10 +114,11 @@ PILOT_REFINED_DATA_NAMES="oracle_seed_42,oracle_seed_43,fine_grid_seed_42,fine_g
 ./scripts/pilot/aggregate_refined_cv.sh
 ```
 
-全21候補について5 foldが揃い、すべて選択対象として使用できるデータセットだけで
-lambdaを選ぶ。不足または非収束候補があれば集計は失敗し、
-`refined_cv_audit.csv` に対象を記録する。その場合は
-`submit_refined_cv.sh` を再実行する。
+5 foldが揃い、収束判定を満たし、検証 `c_td` が有限な候補だけからlambdaを選ぶ。
+利用できない候補は選択対象から外し、件数を `refined_cv_audit.csv` に記録する。
+選択lambdaの隣接候補を利用できない場合は `selection_neighbor_ineligible=true` として
+感度確認の対象にする。利用可能な候補が1つもないデータセットがある場合だけ集計を
+停止する。
 
 選択後の全学習データ再学習と集計は次で行う。
 

@@ -32,20 +32,22 @@ def collect_dataset_results(
     *,
     coarse_base_dir: Path,
     additions_base_dir: Path,
+    lambda_values: list[float],
 ) -> tuple[pd.DataFrame, int]:
     frames: list[pd.DataFrame] = []
     for priority, (source, base_dir) in enumerate(
         (("coarse", coarse_base_dir), ("refined_addition", additions_base_dir))
     ):
-        dataset_dir = base_dir / data_name
-        if not dataset_dir.is_dir():
-            continue
-        frame = collect_results(dataset_dir)
-        if frame.empty:
-            continue
-        frame["result_source"] = source
-        frame["source_priority"] = priority
-        frames.append(frame)
+        for lambda_fuse in lambda_values:
+            lambda_dir = base_dir / data_name / f"lambda_{_lambda_key(lambda_fuse)}"
+            if not lambda_dir.is_dir():
+                continue
+            frame = collect_results(lambda_dir)
+            if frame.empty:
+                continue
+            frame["result_source"] = source
+            frame["source_priority"] = priority
+            frames.append(frame)
     if not frames:
         return pd.DataFrame(), 0
 
@@ -98,6 +100,7 @@ def aggregate_refined_cv(
             data_name,
             coarse_base_dir=coarse_base_dir,
             additions_base_dir=additions_base_dir,
+            lambda_values=local_grid["lambda_fuse"].astype(float).tolist(),
         )
         fold_results = filter_to_local_grid(results, local_grid)
         dataset_output = output_dir / data_name
@@ -120,9 +123,12 @@ def aggregate_refined_cv(
             audit.update(
                 {
                     "eligible_lambdas": 0,
+                    "ineligible_lambdas": int(len(local_grid)),
+                    "grid_complete": False,
                     "selected_lambda": np.nan,
                     "selected_grid_index": np.nan,
                     "selected_at_local_boundary": False,
+                    "selection_neighbor_ineligible": False,
                     "status": "no_results",
                 }
             )
@@ -140,27 +146,17 @@ def aggregate_refined_cv(
             len(fold_results) == expected_results
             and eligible_lambdas == len(local_grid)
         )
-        if not grid_complete:
-            audit.update(
-                {
-                    "eligible_lambdas": eligible_lambdas,
-                    "selected_lambda": np.nan,
-                    "selected_grid_index": np.nan,
-                    "selected_at_local_boundary": False,
-                    "status": "incomplete_or_ineligible_grid",
-                }
-            )
-            failures.append(data_name)
-            audits.append(audit)
-            continue
         selected_rows = summary.loc[_as_bool(summary["selected"])]
         if len(selected_rows) != 1:
             audit.update(
                 {
                     "eligible_lambdas": eligible_lambdas,
+                    "ineligible_lambdas": int(len(local_grid) - eligible_lambdas),
+                    "grid_complete": grid_complete,
                     "selected_lambda": np.nan,
                     "selected_grid_index": np.nan,
                     "selected_at_local_boundary": False,
+                    "selection_neighbor_ineligible": False,
                     "status": "selection_failed",
                 }
             )
@@ -179,14 +175,30 @@ def aggregate_refined_cv(
         if len(grid_match) != 1:
             raise ValueError(f"selected lambda not found in local grid for {data_name}")
         grid_row = grid_match.iloc[0]
+        selected_grid_index = int(grid_row["grid_index"])
+        eligible_keys = set(
+            summary.loc[_as_bool(summary["cv_eligible"]), "lambda_fuse"]
+            .astype(float)
+            .map(_lambda_key)
+        )
+        neighbor_rows = local_grid.loc[
+            local_grid["grid_index"].isin(
+                [selected_grid_index - 1, selected_grid_index + 1]
+            )
+        ]
+        selection_neighbor_ineligible = any(
+            _lambda_key(value) not in eligible_keys
+            for value in neighbor_rows["lambda_fuse"].astype(float)
+        )
         payload.update(
             {
                 "data_name": data_name,
                 "coarse_selected_lambda": float(
                     local_grid["coarse_selected_lambda"].iloc[0]
                 ),
-                "selected_grid_index": int(grid_row["grid_index"]),
+                "selected_grid_index": selected_grid_index,
                 "selected_at_local_boundary": bool(grid_row["is_local_boundary"]),
+                "selection_neighbor_ineligible": selection_neighbor_ineligible,
             }
         )
         (dataset_output / "selected_lambda.json").write_text(
@@ -197,10 +209,13 @@ def aggregate_refined_cv(
         audit.update(
             {
                 "eligible_lambdas": eligible_lambdas,
+                "ineligible_lambdas": int(len(local_grid) - eligible_lambdas),
+                "grid_complete": grid_complete,
                 "selected_lambda": selected_lambda,
-                "selected_grid_index": int(grid_row["grid_index"]),
+                "selected_grid_index": selected_grid_index,
                 "selected_at_local_boundary": bool(grid_row["is_local_boundary"]),
-                "status": "selected",
+                "selection_neighbor_ineligible": selection_neighbor_ineligible,
+                "status": "selected" if grid_complete else "selected_with_exclusions",
             }
         )
         audits.append(audit)
@@ -239,8 +254,16 @@ def main() -> None:
     )
     print(f"Selected lambda for {len(selections)} datasets")
     print(
+        "Selections made with excluded candidates: "
+        f"{int(audit['status'].eq('selected_with_exclusions').sum())}/{len(audit)}"
+    )
+    print(
         f"Selections at a local-grid boundary: "
         f"{int(audit['selected_at_local_boundary'].sum())}/{len(audit)}"
+    )
+    print(
+        "Selections adjacent to an excluded candidate: "
+        f"{int(audit['selection_neighbor_ineligible'].sum())}/{len(audit)}"
     )
 
 
