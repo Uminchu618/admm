@@ -121,15 +121,18 @@ def test_aggregate_refined_cv_selects_best_eligible_lambda(tmp_path: Path) -> No
 
 def test_aggregate_refined_cv_allows_missing_candidates(tmp_path: Path) -> None:
     selections = pd.DataFrame(
-        {"data_name": ["oracle_seed_42"], "selected_lambda": [0.03]}
+        {"data_name": ["oracle_seed_42"], "selected_lambda": [0.001]}
     )
     grid_table = build_grid_table(selections, COARSE_GRID)
+    target_lambda = float(
+        grid_table.loc[grid_table["grid_index"].eq(1), "lambda_fuse"].iloc[0]
+    )
     grid_path = tmp_path / "refined_grid.csv"
     grid_table.to_csv(grid_path, index=False)
     additions_dir = tmp_path / "additions"
 
     for fold in range(5):
-        path = result_path(additions_dir, "oracle_seed_42", 0.03, fold)
+        path = result_path(additions_dir, "oracle_seed_42", target_lambda, fold)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -145,7 +148,7 @@ def test_aggregate_refined_cv_allows_missing_candidates(tmp_path: Path) -> None:
                         "dual_residual_last": 0.0,
                         "converged": True,
                     },
-                    "config": {"lambda_fuse": 0.03},
+                    "config": {"lambda_fuse": target_lambda},
                 }
             ),
             encoding="utf-8",
@@ -160,7 +163,7 @@ def test_aggregate_refined_cv_allows_missing_candidates(tmp_path: Path) -> None:
         tie_tolerance=1e-12,
     )
 
-    assert selected.iloc[0]["selected_lambda"] == 0.03
+    assert selected.iloc[0]["selected_lambda"] == pytest.approx(target_lambda)
     assert audit.iloc[0]["eligible_lambdas"] == 1
     assert audit.iloc[0]["ineligible_lambdas"] == 20
     assert audit.iloc[0]["status"] == "selected_with_exclusions"

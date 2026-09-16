@@ -80,7 +80,10 @@ def aggregate_refined_cv(
     n_folds: int,
     tie_tolerance: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    grid_table = pd.read_csv(grid_path)
+    # lambda値は出力ディレクトリ名にも使うため、CSVへの書き出し前と同じ
+    # 浮動小数点値へ復元する。既定parserでは小さい値の末尾が丸められ、
+    # 実在するlambdaディレクトリを見失うことがある。
+    grid_table = pd.read_csv(grid_path, float_precision="round_trip")
     required = {
         "data_name",
         "coarse_selected_lambda",
