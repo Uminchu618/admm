@@ -39,6 +39,12 @@ baseline_knot_margin = 1.1
 #   大きいほど時間方向に "段差の少ない"（変化点の少ない）β になりやすい。
 lambda_fuse = 10.0
 
+# fuse_penalty / mcp_gamma:
+#   "lasso" は従来の soft-thresholding、"mcp" は firm-thresholding を使う。
+#   MCP では mcp_gamma > 1 かつ mcp_gamma * rho > 1 が必要。
+fuse_penalty = "lasso"
+mcp_gamma = 3.0
+
 # rho:
 #   ADMM のペナルティ係数 ρ。
 #   primal/dual のバランスに影響し、収束速度・安定性が変わり得る。

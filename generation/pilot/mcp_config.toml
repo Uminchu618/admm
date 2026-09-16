@@ -3,9 +3,9 @@ baseline_basis = "bspline"
 n_baseline_basis = 8
 baseline_knot_margin = 1.1
 
-# run_diagnostic_task.sh がタスクごとに上書きする。
+# CV/refit task が lambda_fuse を同一候補で上書きする。
 lambda_fuse = 0.0
-fuse_penalty = "lasso"
+fuse_penalty = "mcp"
 mcp_gamma = 3.0
 rho = 1.0
 max_admm_iter = 1000

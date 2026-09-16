@@ -121,6 +121,20 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
             row = {
                 "data_name": data_dir,
                 "lambda_fuse": float(lambda_str),
+                "fuse_penalty": summary.get(
+                    "fuse_penalty",
+                    history.get("fuse_penalty", config.get("fuse_penalty", "lasso")),
+                ),
+                "mcp_gamma": summary.get(
+                    "mcp_gamma", history.get("mcp_gamma", config.get("mcp_gamma"))
+                ),
+                "initialization_source": summary.get(
+                    "initialization_source",
+                    result.get(
+                        "initialization_source",
+                        history.get("initialization_source", "default"),
+                    ),
+                ),
                 "lambda_fuse_effective": result.get("summary", {}).get(
                     "lambda_fuse_effective",
                     result.get("history", {}).get("lambda_fuse_effective"),
@@ -130,6 +144,7 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
                 "n_features": n_features,
                 "objective_last": summary.get("objective_last"),
                 "neg_loglik_last": summary.get("neg_loglik_last"),
+                "penalty_last": summary.get("penalty_last"),
                 "primal_residual_last": summary.get("primal_residual_last"),
                 "dual_residual_last": summary.get("dual_residual_last"),
                 "primal_tolerance_last": summary.get("primal_tolerance_last"),
@@ -143,6 +158,9 @@ def collect_results(base_dir: Path, z_tol: float) -> List[Dict[str, Any]]:
                 ),
                 "returned_neg_loglik": _returned_history_value(
                     summary, history, "neg_loglik", returned_iter
+                ),
+                "returned_penalty": _returned_history_value(
+                    summary, history, "penalty", returned_iter
                 ),
                 "returned_primal_residual": _returned_history_value(
                     summary, history, "primal_residual", returned_iter
