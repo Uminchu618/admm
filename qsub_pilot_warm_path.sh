@@ -3,7 +3,7 @@
 #$ -cwd
 #$ -l s_vmem=4G
 #$ -pe def_slot 2
-#$ -tc 100
+#$ -tc 200
 #$ -o logs/pilot_warm_path
 #$ -e logs/pilot_warm_path
 
