@@ -91,6 +91,29 @@ Small では recall を維持しながら false positive と precision が改善
 では `detected` と `false_positive` が減るかを主要評価とする。予測性能は独立評価
 `c_td`、係数推定は RMISE で確認する。
 
+## 全学習データのBIC選択
+
+CVを使わず、全学習データ上で同じ9個のlambdaを降順warm startし、正式収束した
+候補のBIC最小値を選ぶ場合は次を実行する。既定はMCPのみである。
+
+```bash
+./scripts/pilot/bic_selection.sh submit
+# qstat -u "$USER" で100 array taskの完了を確認
+./scripts/pilot/bic_selection.sh aggregate
+./scripts/pilot/bic_selection.sh visualize
+```
+
+既定の出力先は `outputs/pilot_bic_selection/mcp/` である。
+
+- `summary.csv`: 全100データセット×9 lambdaの推定・BIC・収束診断
+- `bic_selected_records.csv`: データセットごとのBIC最小fit
+- `bic_selection_audit.csv`: 候補不足、非適格数、grid境界選択などの監査
+- `*/selected_bic.json`: データセットごとの選択manifest
+- `analysis/`: lambda path、BIC選択、独立評価Ctd、RMISE、変化点指標の表と図
+
+lassoとMCPを同じBIC手順で実行する場合は、各コマンドの前に
+`PILOT_PENALTY_METHODS="lasso mcp"` を設定する。
+
 ## 小規模スモーク
 
 既存のパイロット環境変数をそのまま使える。例えばデータ数と fold 数を絞った専用
