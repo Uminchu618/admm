@@ -54,6 +54,23 @@ def read_truth(root: Path) -> dict[str, dict[str, object]]:
     }
 
 
+def resolve_selected_result_path(root: Path, value: str) -> Path:
+    """選択済み fit の旧形式・現行形式の出力パスを解決する。"""
+
+    path = resolve_result_path(root, value)
+    if path.exists():
+        return path
+
+    relative = Path(value)
+    # penalty comparison の MCP CV refit は、CSV には ``mcp/refit/...``
+    # と記録される一方、現在の実体はこの run 固有の root 下にある。
+    if not relative.is_absolute() and relative.parts[:2] == ("mcp", "refit"):
+        relocated = root / "outputs" / "pilot_penalty_comparison" / relative
+        if relocated.exists():
+            return relocated
+    return path
+
+
 def add_truth_metrics(
     rows: pd.DataFrame,
     root: Path,
@@ -71,7 +88,7 @@ def add_truth_metrics(
     records: list[dict[str, object]] = []
     for row in rows.itertuples(index=False):
         scenario, seed = scenario_and_seed(row.data_name)
-        result_path = resolve_result_path(root, str(row.result_path))
+        result_path = resolve_selected_result_path(root, str(row.result_path))
         result = json.loads(result_path.read_text(encoding="utf-8"))
         true_positive, detected, truth = change_point_counts(
             result, truths[scenario], scenario, z_tolerance
