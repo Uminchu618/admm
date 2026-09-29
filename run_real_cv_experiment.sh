@@ -42,7 +42,10 @@ if [ ! -f "$splits_file" ]; then
 	exit 1
 fi
 
-mapfile -t lambda_values < <("$uv_bin" run python - <<PY
+lambda_values=()
+while IFS= read -r lambda_value; do
+	lambda_values+=("$lambda_value")
+done < <("$uv_bin" run python - <<PY
 import json
 from pathlib import Path
 payload = json.loads(Path("$lambda_grid_file").read_text(encoding="utf-8"))

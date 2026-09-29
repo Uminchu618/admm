@@ -287,9 +287,17 @@ def _add_aft_test_references(
 
 def _set_lambda_axis(ax: plt.Axes, lambdas: pd.Series | np.ndarray) -> None:
     values = np.asarray(lambdas, dtype=float)
+    finite = np.unique(values[np.isfinite(values)])
+    positive = finite[finite > 0]
     if np.all(values > 0):
         ax.set_xscale("log")
         ax.set_xlabel("lambda_fuse (log scale)")
+    elif positive.size and np.max(positive) / np.min(positive) >= 100:
+        # A symlog axis keeps lambda=0 visible beside several orders of magnitude.
+        ax.set_xscale("symlog", linthresh=float(np.min(positive)), linscale=0.6)
+        ax.set_xticks(finite)
+        ax.set_xticklabels([f"{value:.4g}" for value in finite], rotation=35)
+        ax.set_xlabel("lambda_fuse (symmetric log scale)")
     else:
         ax.set_xlabel("lambda_fuse")
     ax.grid(True, alpha=0.3)

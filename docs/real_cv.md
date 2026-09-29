@@ -1,5 +1,8 @@
 # Real-data cross-validation
 
+MCP罰則・シミュレーションと同じ9点のlambda gridを使う
+Framingham/SUPPORT2の実験は [real_mcp_cv.md](real_mcp_cv.md) を参照。
+
 実データの CV は qsub のアレイジョブで `lambda_fuse × fold` を並列実行する。
 Support2 と Framingham は同じ実行コードを使い、raw CSV から base データを作る部分だけ `scripts/real_cv/datasets.py` で分ける。
 `lambda_fuse` は既存の lambda 並列実験と同じく `lambda_grid.json` から読む。

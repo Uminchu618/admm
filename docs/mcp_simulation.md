@@ -1,5 +1,7 @@
 # Fused MCP 実装とシミュレーション
 
+Framingham/SUPPORT2の実データ5-fold CVは [real_mcp_cv.md](real_mcp_cv.md) を参照。
+
 ## 設定
 
 `ADMMHazardAFT` は次の設定で罰則を切り替える。

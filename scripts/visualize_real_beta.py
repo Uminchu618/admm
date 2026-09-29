@@ -131,8 +131,16 @@ def plot_cv_beta_trajectories_by_lambda(
     dataset_name: str,
     cv_dir: Path,
     output_dir: Path,
+    selected_lambdas: set[float] | None = None,
 ) -> list[Path]:
     by_lambda = collect_cv_results(cv_dir)
+    if selected_lambdas is not None:
+        missing = selected_lambdas - set(by_lambda)
+        if missing:
+            raise ValueError(f"Missing CV results for lambda: {sorted(missing)}")
+        by_lambda = {
+            value: rows for value, rows in by_lambda.items() if value in selected_lambdas
+        }
     if not by_lambda:
         raise ValueError(f"No CV result.json files found under {cv_dir}")
 
