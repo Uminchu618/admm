@@ -338,6 +338,10 @@ def main() -> None:
 
     summary_df = summarize_by_lambda(fold_df, expected_n_folds=args.n_folds)
     if args.selection_pending:
+        provisional = mark_selected_lambda(
+            summary_df, tie_tolerance=args.tie_tolerance
+        )
+        summary_df["provisional_selected"] = provisional["selected"]
         summary_df["selected"] = False
     else:
         summary_df = mark_selected_lambda(summary_df, tie_tolerance=args.tie_tolerance)
@@ -348,9 +352,20 @@ def main() -> None:
     fold_df.to_csv(fold_output, index=False, encoding="utf-8")
     summary_df.to_csv(summary_output, index=False, encoding="utf-8")
     if args.selection_pending:
+        provisional_rows = summary_df.loc[summary_df["provisional_selected"]]
+        provisional_row = provisional_rows.iloc[0] if len(provisional_rows) == 1 else None
         payload = {
             "selection_method": "pending_cv_completion",
             "selected_lambda": None,
+            "provisional_lambda": (
+                float(provisional_row["lambda_fuse"])
+                if provisional_row is not None else None
+            ),
+            "provisional_mean_c_td": (
+                float(provisional_row["c_td_test_mean"])
+                if provisional_row is not None else None
+            ),
+            "n_eligible_lambdas": int(_as_bool(summary_df["cv_eligible"]).sum()),
             "base_dir": str(args.base_dir),
             "n_folds": args.n_folds,
             "n_results_available": len(fold_df),
@@ -368,7 +383,14 @@ def main() -> None:
     print(f"Saved lambda summary to: {summary_output}")
     print(f"Saved selected lambda to: {selection_output}")
     if args.selection_pending:
-        print("CV selection pending: rerun aggregation after all tasks finish.")
+        if payload["provisional_lambda"] is None:
+            print("CV selection pending: no complete, eligible lambda yet.")
+        else:
+            print(
+                "Provisional lambda among complete, eligible candidates: "
+                f"{payload['provisional_lambda']:.6g}"
+            )
+        print("Rerun aggregation after all tasks finish.")
         return
     print("\n=== Selected lambda by 5-fold mean test Ctd ===")
     print(summary_df.loc[summary_df["selected"]])

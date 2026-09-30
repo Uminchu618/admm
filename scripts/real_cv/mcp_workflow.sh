@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-uv_bin="${UV_BIN:-/home/sagara/.local/bin/uv}"
+uv_bin="${UV_BIN:-uv}"
 config_path="${CONFIG_PATH:-$repo_root/config_real_mcp.toml}"
 lambda_grid="${LAMBDA_GRID:-$repo_root/generation/pilot/lambda_grid.json}"
 output_root="${REAL_MCP_OUTPUT_ROOT:-$repo_root/outputs/real_cv}"
@@ -105,15 +105,31 @@ case "$action" in
         "$uv_bin" run scripts/real_cv/compute_cox_baseline.py --base-dir "$base_dir"
         ;;
     visualize)
-        "$uv_bin" run scripts/real_cv/validate_mcp_results.py \
-            --base-dir "$base_dir" --lambda-grid "$lambda_grid" --n-folds "$n_folds"
-        require_final_selection
+        status="$("$uv_bin" run scripts/real_cv/validate_mcp_results.py \
+            --base-dir "$base_dir" --lambda-grid "$lambda_grid" --n-folds "$n_folds" \
+            --allow-missing --status-only)"
         [ -f "$base_dir/cox_summary.csv" ] || { echo "Run baselines first: $base_dir" >&2; exit 1; }
-        "$uv_bin" run scripts/real_cv/visualize_results.py \
-            --base-dir "$base_dir" --summary-by-lambda "$base_dir/summary_by_lambda.csv" \
-            --cox-summary "$base_dir/cox_summary.csv" --no-write-csv
-        "$uv_bin" run scripts/real_cv/visualize_mcp_beta.py \
-            --dataset "$dataset" --base-dir "$base_dir"
+        if [ "$status" = "partial" ]; then
+            "$uv_bin" run scripts/real_cv/aggregate_results.py \
+                --base-dir "$base_dir" --n-folds "$n_folds" --selection-pending
+            "$uv_bin" run scripts/real_cv/visualize_results.py \
+                --base-dir "$base_dir" --summary-by-lambda "$base_dir/summary_by_lambda.csv" \
+                --cox-summary "$base_dir/cox_summary.csv" --no-write-csv \
+                --partial --output-dir "$base_dir/plots_partial"
+            "$uv_bin" run scripts/real_cv/visualize_mcp_beta.py \
+                --dataset "$dataset" --base-dir "$base_dir" \
+                --partial --output-dir "$base_dir/plots_partial"
+            echo "Partial CV figures saved under $base_dir/plots_partial; rerun aggregate and visualize after all tasks finish."
+        else
+            "$uv_bin" run scripts/real_cv/aggregate_results.py \
+                --base-dir "$base_dir" --n-folds "$n_folds"
+            require_final_selection
+            "$uv_bin" run scripts/real_cv/visualize_results.py \
+                --base-dir "$base_dir" --summary-by-lambda "$base_dir/summary_by_lambda.csv" \
+                --cox-summary "$base_dir/cox_summary.csv" --no-write-csv
+            "$uv_bin" run scripts/real_cv/visualize_mcp_beta.py \
+                --dataset "$dataset" --base-dir "$base_dir"
+        fi
         ;;
     submit-refit)
         "$uv_bin" run scripts/real_cv/validate_mcp_results.py \

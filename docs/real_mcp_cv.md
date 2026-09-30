@@ -36,11 +36,19 @@ outputs/real_cv/support2/mcp_5fold_seed1234/lambda_0.25/fold_00/result.json
 集計時は存在する `result.json` のMCP・lambda設定を検査する。
 実行中のタスクが残っていても `fold_results.csv` と `summary_by_lambda.csv` を
 暫定出力し、`selected_lambda.json` は `pending_cv_completion` と記録する。
+この時点で5 foldすべてが揃い、収束・有限test `c_td` の条件を満たすlambdaだけから
+暫定lambdaを選び、`provisional_lambda` に記録する。欠けたfoldを持つlambdaは
+暫定選択の候補に含めない。
 全45件が揃ったら同じ `aggregate` コマンドを再実行してlambdaを確定する。
 設定不整合や想定外の結果ファイルがあれば集計を停止する。
 lambda選択は全5 foldが収束し有限の test `c_td` を持つ候補の平均 test `c_td`
 最大値を使い、同点なら大きいlambdaを選ぶ。選択に独立評価データやBICは使わない。
 `baselines` は同じ fold の train/test CSV で CoxPH を推定する。
+未完了でも `visualize` を実行でき、その時点で利用可能なfoldによる暫定図を
+`plots_partial/` に保存する。暫定lambdaがあればCV性能図に印を付け、
+`plots_partial/selected_beta/` にその係数軌跡を描く。
+`visualize` は現在の結果から集計表を更新するため、ジョブの進行中に再実行できる。
+全45件が揃ったら `visualize` を再実行し、lambda選択と最終図を `plots/` に作る。
 
 主な生成物:
 

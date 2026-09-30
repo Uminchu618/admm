@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -172,6 +173,9 @@ def test_partial_aggregate_then_final_selection(tmp_path: Path) -> None:
                     },
                     "n_samples": 10,
                     "n_eval_samples": 5,
+                    "coef": [[value + fold], [value + fold + 1]],
+                    "time_grid": [0, 1, 2],
+                    "feature_cols": ["age"],
                 }
             ),
             encoding="utf-8",
@@ -195,15 +199,63 @@ def test_partial_aggregate_then_final_selection(tmp_path: Path) -> None:
     pending = json.loads((base / "selected_lambda.json").read_text(encoding="utf-8"))
     assert pending["selection_method"] == "pending_cv_completion"
     assert pending["selected_lambda"] is None
+    assert pending["provisional_lambda"] == 0.0
+    assert pending["n_eligible_lambdas"] == 1
     assert pending["n_results_available"] == 3
     assert (base / "fold_results.csv").is_file()
     assert (base / "summary_by_lambda.csv").is_file()
+    (base / "cox_summary.csv").write_text(
+        "c_td_test_cox_mean,c_td_test_cox_se\n0.65,0.01\n",
+        encoding="utf-8",
+    )
+    visualize = [
+        "bash", str(ROOT / "scripts/real_cv/mcp_workflow.sh"), "visualize", "support2"
+    ]
+    subprocess.run(visualize, cwd=ROOT, env=env, capture_output=True, text=True, check=True)
+    assert (base / "plots_partial/cv_lambda_vs_c_td.png").is_file()
+    assert len(list((base / "plots_partial/beta_by_lambda").glob("*.png"))) == 2
+    assert len(list((base / "plots_partial/selected_beta").glob("*.png"))) == 1
+    assert not (base / "plots/cv_lambda_vs_c_td.png").exists()
 
     write_result(0.1, 1)
     subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=True)
     final = json.loads((base / "selected_lambda.json").read_text(encoding="utf-8"))
     assert final["selection_method"] == "five_fold_cv_mean_c_td"
     assert final["selected_lambda"] == 0.1
+    subprocess.run(visualize, cwd=ROOT, env=env, capture_output=True, text=True, check=True)
+    assert (base / "plots/cv_lambda_vs_c_td.png").is_file()
+    assert len(list((base / "plots/selected_beta").glob("*.png"))) == 1
+
+
+def test_partial_aggregate_without_complete_candidate_keeps_provisional_empty(
+    tmp_path: Path,
+) -> None:
+    base = tmp_path / "cv"
+    for value, fold in [(0.0, 0), (0.1, 1)]:
+        path = base / f"lambda_{value:.15g}" / f"fold_{fold:02d}" / "result.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "config": {"lambda_fuse": value},
+                    "summary": {"converged": True, "c_td_test": 0.7},
+                }
+            ),
+            encoding="utf-8",
+        )
+    subprocess.run(
+        [
+            sys.executable, "scripts/real_cv/aggregate_results.py",
+            "--base-dir", str(base), "--n-folds", "2", "--selection-pending",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    pending = json.loads((base / "selected_lambda.json").read_text(encoding="utf-8"))
+    assert pending["provisional_lambda"] is None
+    assert pending["n_eligible_lambdas"] == 0
 
 
 def test_zero_and_small_lambdas_use_readable_axis() -> None:

@@ -321,6 +321,7 @@ def plot_lambda_vs_c_td(
     aft_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
+    provisional: bool = False,
 ) -> Path:
     """lambda ごとの test c_td を fold 点・平均線・エラーバーで描く。"""
 
@@ -342,6 +343,9 @@ def plot_lambda_vs_c_td(
             label=f"fold {int(fold):02d}" if pd.notna(fold) else "fold NA",
         )
 
+    mean_label = "available-fold mean" if provisional else "mean"
+    if error != "none":
+        mean_label += f" +/- {error}"
     ax.errorbar(
         lambdas,
         valid_summary["c_td_test_mean"].to_numpy(dtype=float),
@@ -350,36 +354,43 @@ def plot_lambda_vs_c_td(
         marker="o",
         linewidth=2.0,
         capsize=4,
-        label=f"mean +/- {error}" if error != "none" else "mean",
+        label=mean_label,
     )
     _add_cox_test_reference(ax, cox_df, error=error)
     _add_aft_test_references(ax, aft_df, error=error)
 
     selected_rows = valid_summary.iloc[0:0]
-    if "selected" in valid_summary.columns:
+    selection_column = "provisional_selected" if provisional else "selected"
+    if selection_column in valid_summary.columns:
         selected_rows = valid_summary.loc[
-            valid_summary["selected"].astype("string").str.lower().isin({"true", "1"})
+            valid_summary[selection_column].astype("string").str.lower().isin({"true", "1"})
         ]
-    best_idx = (
-        selected_rows.index[0]
-        if len(selected_rows) == 1
-        else valid_summary["c_td_test_mean"].idxmax()
-    )
-    best_lambda = float(valid_summary.loc[best_idx, "lambda_fuse"])
-    best_score = float(valid_summary.loc[best_idx, "c_td_test_mean"])
-    ax.axvline(best_lambda, color="#d62728", linestyle="--", linewidth=1.3)
-    ax.annotate(
-        f"best lambda={best_lambda:.4g}\nmean c_td={best_score:.3f}",
-        xy=(best_lambda, best_score),
-        xytext=(8, 10),
-        textcoords="offset points",
-        fontsize=9,
-        color="#7f1d1d",
-    )
+    if len(selected_rows) == 1:
+        best_idx = selected_rows.index[0]
+    elif not provisional and "selected" not in valid_summary.columns:
+        best_idx = valid_summary["c_td_test_mean"].idxmax()
+    else:
+        best_idx = None
+    if best_idx is not None:
+        best_lambda = float(valid_summary.loc[best_idx, "lambda_fuse"])
+        best_score = float(valid_summary.loc[best_idx, "c_td_test_mean"])
+        ax.axvline(best_lambda, color="#d62728", linestyle="--", linewidth=1.3)
+        label = "provisional lambda" if provisional else "best lambda"
+        ax.annotate(
+            f"{label}={best_lambda:.4g}\nmean c_td={best_score:.3f}",
+            xy=(best_lambda, best_score),
+            xytext=(8, 10),
+            textcoords="offset points",
+            fontsize=9,
+            color="#7f1d1d",
+        )
 
     _set_lambda_axis(ax, lambdas)
     ax.set_ylabel("test c_td")
-    ax.set_title("CV test c_td by lambda")
+    ax.set_title(
+        "Partial CV test c_td by lambda (available folds)"
+        if provisional else "CV test c_td by lambda"
+    )
     ax.legend(loc="best", fontsize="small", ncols=2)
     fig.tight_layout()
 
@@ -811,6 +822,7 @@ def create_all_plots(
     aft_df: pd.DataFrame | None = None,
     error: str = "se",
     dpi: int = 150,
+    provisional: bool = False,
 ) -> list[Path]:
     """1〜4 の CV 可視化をまとめて作成する。"""
 
@@ -824,6 +836,7 @@ def create_all_plots(
             aft_df=aft_df,
             error=error,
             dpi=dpi,
+            provisional=provisional,
         ),
         plot_train_test_c_td(
             summary_df,
@@ -906,6 +919,10 @@ def main() -> None:
         action="store_true",
         help="Do not write fold_results.csv and summary_by_lambda.csv.",
     )
+    parser.add_argument(
+        "--partial", action="store_true",
+        help="Mark plots as provisional and suppress selected-lambda reporting.",
+    )
 
     args = parser.parse_args()
     output_dir = args.output_dir or (args.base_dir / "plots")
@@ -917,6 +934,8 @@ def main() -> None:
         fold_results_path=args.fold_results,
         summary_path=args.summary_by_lambda,
     )
+    if args.partial:
+        summary_df["selected"] = False
 
     if not args.no_write_csv:
         write_cv_tables(fold_df, summary_df, fold_output, summary_output)
@@ -941,9 +960,25 @@ def main() -> None:
         aft_df=aft_df,
         error=args.error,
         dpi=args.dpi,
+        provisional=args.partial,
     )
     for output in outputs:
         print(f"Saved plot to: {output}")
+
+    if args.partial:
+        provisional_rows = summary_df.loc[
+            summary_df.get("provisional_selected", pd.Series(False, index=summary_df.index))
+            .astype("string").str.lower().isin({"true", "1"})
+        ]
+        if len(provisional_rows) == 1:
+            print(
+                "Partial CV plots: provisional lambda="
+                f"{float(provisional_rows.iloc[0]['lambda_fuse']):.6g}; "
+                "final selection is pending."
+            )
+        else:
+            print("Partial CV plots: no eligible lambda yet; final selection is pending.")
+        return
 
     best = summary_df.dropna(subset=["c_td_test_mean"])
     if "selected" in best.columns:
