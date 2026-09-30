@@ -64,6 +64,21 @@ print(len(values))
 PY
 }
 
+require_final_selection() {
+    "$uv_bin" run python - "$base_dir/selected_lambda.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.is_file():
+    raise SystemExit(f"Run aggregate first: {path}")
+selection = json.loads(path.read_text(encoding="utf-8"))
+if selection.get("selection_method") != "five_fold_cv_mean_c_td":
+    raise SystemExit(f"CV selection is pending; rerun aggregate: {path}")
+PY
+}
+
 case "$action" in
     submit|submit-warm)
         n_lambda="$(validate_inputs | tail -n 1)"
@@ -75,15 +90,24 @@ case "$action" in
         fi
         ;;
     aggregate)
-        "$uv_bin" run scripts/real_cv/validate_mcp_results.py \
-            --base-dir "$base_dir" --lambda-grid "$lambda_grid" --n-folds "$n_folds"
-        "$uv_bin" run scripts/real_cv/aggregate_results.py --base-dir "$base_dir" --n-folds "$n_folds"
+        status="$("$uv_bin" run scripts/real_cv/validate_mcp_results.py \
+            --base-dir "$base_dir" --lambda-grid "$lambda_grid" --n-folds "$n_folds" \
+            --allow-missing --status-only)"
+        if [ "$status" = "partial" ]; then
+            "$uv_bin" run scripts/real_cv/aggregate_results.py \
+                --base-dir "$base_dir" --n-folds "$n_folds" --selection-pending
+        else
+            "$uv_bin" run scripts/real_cv/aggregate_results.py \
+                --base-dir "$base_dir" --n-folds "$n_folds"
+        fi
         ;;
     baselines)
         "$uv_bin" run scripts/real_cv/compute_cox_baseline.py --base-dir "$base_dir"
         ;;
     visualize)
-        [ -f "$base_dir/selected_lambda.json" ] || { echo "Run aggregate first: $base_dir" >&2; exit 1; }
+        "$uv_bin" run scripts/real_cv/validate_mcp_results.py \
+            --base-dir "$base_dir" --lambda-grid "$lambda_grid" --n-folds "$n_folds"
+        require_final_selection
         [ -f "$base_dir/cox_summary.csv" ] || { echo "Run baselines first: $base_dir" >&2; exit 1; }
         "$uv_bin" run scripts/real_cv/visualize_results.py \
             --base-dir "$base_dir" --summary-by-lambda "$base_dir/summary_by_lambda.csv" \
@@ -92,11 +116,15 @@ case "$action" in
             --dataset "$dataset" --base-dir "$base_dir"
         ;;
     submit-refit)
-        [ -f "$base_dir/selected_lambda.json" ] || { echo "Run aggregate first: $base_dir" >&2; exit 1; }
+        "$uv_bin" run scripts/real_cv/validate_mcp_results.py \
+            --base-dir "$base_dir" --lambda-grid "$lambda_grid" --n-folds "$n_folds"
+        require_final_selection
         qsub -t 1-1:1 -v "UV_BIN=$uv_bin,DATASETS=$dataset,CONFIG_PATH=$config_path,N_FOLDS=$n_folds,SPLIT_SEED=$split_seed,CV_EXPERIMENT_NAME=$experiment,CV_OUTPUT_BASE_DIR=$output_root,OUTPUT_BASE_DIR=$full_output_root,EXPERIMENT_NAME=$full_experiment" qsub_real_mcp_full.sh
         ;;
     plot-refit)
-        [ -f "$base_dir/selected_lambda.json" ] || { echo "Run aggregate first: $base_dir" >&2; exit 1; }
+        "$uv_bin" run scripts/real_cv/validate_mcp_results.py \
+            --base-dir "$base_dir" --lambda-grid "$lambda_grid" --n-folds "$n_folds"
+        require_final_selection
         "$uv_bin" run scripts/real_cv/visualize_mcp_beta.py \
             --dataset "$dataset" --base-dir "$base_dir" \
             --full-dir "$full_output_root/$dataset/$full_experiment" --full-only

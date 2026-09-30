@@ -139,13 +139,71 @@ def test_validation_finds_missing_or_wrong_penalty_results(tmp_path: Path) -> No
     (base / "lambda_0.1/fold_01/result.json").unlink()
     with pytest.raises(RuntimeError, match="1 missing"):
         validate(base, grid, 2)
+    assert validate(base, grid, 2, allow_missing=True) == 3
     wrong = base / "lambda_0.1/fold_01/result.json"
     wrong.write_text(
         json.dumps({"config": {"fuse_penalty": "lasso", "lambda_fuse": 0.1}}),
         encoding="utf-8",
     )
     with pytest.raises(RuntimeError, match="1 invalid"):
-        validate(base, grid, 2)
+        validate(base, grid, 2, allow_missing=True)
+
+
+def test_partial_aggregate_then_final_selection(tmp_path: Path) -> None:
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is unavailable")
+    grid = tmp_path / "grid.json"
+    grid.write_text(json.dumps({"lambda_values": [0.0, 0.1]}), encoding="utf-8")
+    output_root = tmp_path / "real_cv"
+    base = output_root / "support2/mcp_2fold_seed1234"
+
+    def write_result(value: float, fold: int) -> None:
+        path = base / f"lambda_{value:.15g}" / f"fold_{fold:02d}" / "result.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "config": {"fuse_penalty": "mcp", "lambda_fuse": value},
+                    "summary": {
+                        "converged": True,
+                        "c_td_train": 0.7,
+                        "c_td_test": 0.6 + value,
+                    },
+                    "n_samples": 10,
+                    "n_eval_samples": 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    for value, fold in [(0.0, 0), (0.0, 1), (0.1, 0)]:
+        write_result(value, fold)
+    env = os.environ.copy()
+    env.update(
+        {
+            "UV_BIN": uv,
+            "REAL_MCP_OUTPUT_ROOT": str(output_root),
+            "LAMBDA_GRID": str(grid),
+            "N_FOLDS": "2",
+        }
+    )
+    command = [
+        "bash", str(ROOT / "scripts/real_cv/mcp_workflow.sh"), "aggregate", "support2"
+    ]
+    subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=True)
+    pending = json.loads((base / "selected_lambda.json").read_text(encoding="utf-8"))
+    assert pending["selection_method"] == "pending_cv_completion"
+    assert pending["selected_lambda"] is None
+    assert pending["n_results_available"] == 3
+    assert (base / "fold_results.csv").is_file()
+    assert (base / "summary_by_lambda.csv").is_file()
+
+    write_result(0.1, 1)
+    subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=True)
+    final = json.loads((base / "selected_lambda.json").read_text(encoding="utf-8"))
+    assert final["selection_method"] == "five_fold_cv_mean_c_td"
+    assert final["selected_lambda"] == 0.1
 
 
 def test_zero_and_small_lambdas_use_readable_axis() -> None:

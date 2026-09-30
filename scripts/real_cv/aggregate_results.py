@@ -320,6 +320,11 @@ def main() -> None:
     )
     parser.add_argument("--n-folds", type=int, default=5)
     parser.add_argument("--tie-tolerance", type=float, default=1e-12)
+    parser.add_argument(
+        "--selection-pending",
+        action="store_true",
+        help="Write interim tables but defer selected_lambda until all fits finish.",
+    )
     args = parser.parse_args()
 
     fold_output = args.fold_output or (args.base_dir / "fold_results.csv")
@@ -331,27 +336,40 @@ def main() -> None:
         print(f"No result.json files found under {args.base_dir}")
         return
 
-    summary_df = mark_selected_lambda(
-        summarize_by_lambda(fold_df, expected_n_folds=args.n_folds),
-        tie_tolerance=args.tie_tolerance,
-    )
+    summary_df = summarize_by_lambda(fold_df, expected_n_folds=args.n_folds)
+    if args.selection_pending:
+        summary_df["selected"] = False
+    else:
+        summary_df = mark_selected_lambda(summary_df, tie_tolerance=args.tie_tolerance)
 
     fold_output.parent.mkdir(parents=True, exist_ok=True)
     summary_output.parent.mkdir(parents=True, exist_ok=True)
     selection_output.parent.mkdir(parents=True, exist_ok=True)
     fold_df.to_csv(fold_output, index=False, encoding="utf-8")
     summary_df.to_csv(summary_output, index=False, encoding="utf-8")
-    payload = selection_payload(
-        summary_df,
-        base_dir=args.base_dir,
-        tie_tolerance=args.tie_tolerance,
-    )
+    if args.selection_pending:
+        payload = {
+            "selection_method": "pending_cv_completion",
+            "selected_lambda": None,
+            "base_dir": str(args.base_dir),
+            "n_folds": args.n_folds,
+            "n_results_available": len(fold_df),
+        }
+    else:
+        payload = selection_payload(
+            summary_df,
+            base_dir=args.base_dir,
+            tie_tolerance=args.tie_tolerance,
+        )
     with selection_output.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
     print(f"Saved fold results to: {fold_output}")
     print(f"Saved lambda summary to: {summary_output}")
     print(f"Saved selected lambda to: {selection_output}")
+    if args.selection_pending:
+        print("CV selection pending: rerun aggregation after all tasks finish.")
+        return
     print("\n=== Selected lambda by 5-fold mean test Ctd ===")
     print(summary_df.loc[summary_df["selected"]])
 

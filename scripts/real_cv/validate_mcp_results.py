@@ -15,7 +15,9 @@ sys.path.insert(0, str(ROOT))
 from scripts.real_cv.common import lambda_label, load_lambda_values  # noqa: E402
 
 
-def validate(base_dir: Path, grid_path: Path, n_folds: int) -> int:
+def validate(
+    base_dir: Path, grid_path: Path, n_folds: int, *, allow_missing: bool = False
+) -> int:
     values = load_lambda_values(grid_path)
     if len(values) != len(set(values)) or any(not math.isfinite(v) or v < 0 for v in values):
         raise ValueError("Invalid lambda grid")
@@ -39,13 +41,16 @@ def validate(base_dir: Path, grid_path: Path, n_folds: int) -> int:
             except (OSError, ValueError, KeyError, TypeError):
                 invalid.append(str(path))
     unexpected = sorted(str(path) for path in base_dir.rglob("result.json") if path not in expected_paths)
-    if missing or invalid or unexpected:
+    if (missing and not allow_missing) or invalid or unexpected:
         raise RuntimeError(
             f"MCP CV incomplete/invalid: {len(missing)} missing, "
             f"{len(invalid)} invalid, {len(unexpected)} unexpected\n"
             + "\n".join((missing + invalid + unexpected)[:10])
         )
-    return len(values) * n_folds
+    available = len(values) * n_folds - len(missing)
+    if available == 0:
+        raise RuntimeError(f"No MCP CV result.json files found in {base_dir}")
+    return available
 
 
 def main() -> None:
@@ -53,11 +58,28 @@ def main() -> None:
     parser.add_argument("--base-dir", type=Path, required=True)
     parser.add_argument("--lambda-grid", type=Path, required=True)
     parser.add_argument("--n-folds", type=int, default=5)
+    parser.add_argument("--allow-missing", action="store_true")
+    parser.add_argument("--status-only", action="store_true")
     args = parser.parse_args()
     if args.n_folds < 2:
         parser.error("n-folds must be >= 2")
-    count = validate(args.base_dir, args.lambda_grid, args.n_folds)
-    print(f"Validated {count} MCP CV results in {args.base_dir}")
+    count = validate(
+        args.base_dir, args.lambda_grid, args.n_folds,
+        allow_missing=args.allow_missing,
+    )
+    expected = len(load_lambda_values(args.lambda_grid)) * args.n_folds
+    status = "complete" if count == expected else "partial"
+    if args.status_only:
+        print(status)
+        print(f"MCP CV results: {count}/{expected} ({status})", file=sys.stderr)
+        if status == "partial":
+            for value in load_lambda_values(args.lambda_grid):
+                for fold in range(args.n_folds):
+                    path = args.base_dir / lambda_label(value) / f"fold_{fold:02d}" / "result.json"
+                    if not path.is_file():
+                        print(f"Pending: {path}", file=sys.stderr)
+    else:
+        print(f"Validated {count}/{expected} MCP CV results in {args.base_dir} ({status})")
 
 
 if __name__ == "__main__":

@@ -33,7 +33,11 @@ outputs/real_cv/support2/mcp_5fold_seed1234/lambda_0.25/fold_00/result.json
 ./scripts/real_cv/mcp_workflow.sh visualize support2
 ```
 
-集計前に45個の `result.json` とそのMCP・lambda設定を検査する。
+集計時は存在する `result.json` のMCP・lambda設定を検査する。
+実行中のタスクが残っていても `fold_results.csv` と `summary_by_lambda.csv` を
+暫定出力し、`selected_lambda.json` は `pending_cv_completion` と記録する。
+全45件が揃ったら同じ `aggregate` コマンドを再実行してlambdaを確定する。
+設定不整合や想定外の結果ファイルがあれば集計を停止する。
 lambda選択は全5 foldが収束し有限の test `c_td` を持つ候補の平均 test `c_td`
 最大値を使い、同点なら大きいlambdaを選ぶ。選択に独立評価データやBICは使わない。
 `baselines` は同じ fold の train/test CSV で CoxPH を推定する。
