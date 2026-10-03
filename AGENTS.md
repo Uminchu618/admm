@@ -250,6 +250,9 @@ BIC は `2 * neg_loglik_last + n_params * log(n_samples)` で計算します。`
 - 連続特徴量の標準化は train fold の平均・標準偏差だけで train/test に適用します。
 - Framingham は `time_scale_max=8766.0`、Support2 は train fold の最大 `time_original` を基準に time を `time_grid` 範囲へスケールします。
 - `lambda_grid.json` が 10 点、`N_FOLDS=5` なら qsub の task は 50 です。
+- lambda は5 foldすべてが収束し有限な検証 `c_td` を持つ候補のうち、平均
+  検証 `c_td` 最大の値を選びます。同点では大きいlambdaを選びます。
+- 集計は `selected_lambda.json` を出力し、全データ再学習はこの値だけを使います。
 - `SGE_TASK_ID` の対応は `lambda_idx = task_idx // n_folds`, `fold_idx = task_idx % n_folds` です。
 - 出力先は `outputs/real_cv/{dataset}/{experiment_name}/lambda_{value}/fold_{xx}/` です。
 
@@ -306,6 +309,8 @@ WandB は任意依存です。
 - `score()` は `c_td` です。ログ尤度系の指標を追加する場合は別名の metric として扱ってください。
 - `c_td` の仕様変更は `docs/ctd-index.md` と `tests/test_evaluator_c_td.py` を同時に更新してください。
 - real CV の dataset 固有処理は `scripts/real_cv/datasets.py` に閉じ込め、共通処理は `common.py` に置いてください。
+- シミュレーションの主解析では `docs/simulation_cv.md` に従い、独立評価データを
+  lambda選択へ混入させないでください。BIC選択は過去結果・診断用です。
 - 実験スクリプトは SGE 環境とローカル 1 task 実行の両方を壊さないでください。
 - `clip_eta`、line search、ADMM 停止判定、`return_best_iterate` は数値安定性のための重要部品です。周辺を変更したら smoke test だけでなく履歴キーと停止理由も確認してください。
 - shell script の `UV_BIN` 既定値はスパコン環境向けです。ローカル実行時は `UV_BIN=$(which uv)` などで上書きできます。

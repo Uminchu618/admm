@@ -85,6 +85,8 @@ class ADMMHazardAFT:
         rho_update_interval: int = 10,
         rho_min: float = 1e-6,
         rho_max: float = 1e6,
+        fuse_penalty: str = "lasso",
+        mcp_gamma: float = 3.0,
     ) -> None:
 
         self.time_grid = time_grid
@@ -114,6 +116,8 @@ class ADMMHazardAFT:
         self.rho_update_interval = rho_update_interval
         self.rho_min = rho_min
         self.rho_max = rho_max
+        self.fuse_penalty = fuse_penalty
+        self.mcp_gamma = mcp_gamma
         self.clip_eta = clip_eta
         self.random_state = random_state
 
@@ -143,7 +147,14 @@ class ADMMHazardAFT:
         # 残りは **config_dict として __init__ に展開する。
         return cls(quadrature=quadrature, **config_dict)
 
-    def fit(self, X: ArrayLike, y: ArrayLike) -> "ADMMHazardAFT":
+    def fit(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        *,
+        beta0: Optional[ArrayLike] = None,
+        gamma0: Optional[ArrayLike] = None,
+    ) -> "ADMMHazardAFT":
         """モデルを学習する。
 
         Args:
@@ -171,10 +182,28 @@ class ADMMHazardAFT:
 
         # パラメータ初期値（β, γ）を用意する。
         # ここでの初期化は数値安定性に影響する可能性がある。
-        beta0, gamma0 = self._initialize_params(X, T, delta)
+        beta_default, gamma_default = self._initialize_params(X, T, delta)
+        beta_was_provided = beta0 is not None
+        gamma_was_provided = gamma0 is not None
+        beta0 = beta_default if beta0 is None else np.asarray(beta0, dtype=float)
+        gamma0 = gamma_default if gamma0 is None else np.asarray(gamma0, dtype=float)
+        if beta0.shape != beta_default.shape:
+            raise ValueError(
+                f"beta0 の形状は {beta_default.shape} である必要があります。"
+            )
+        if gamma0.shape != gamma_default.shape:
+            raise ValueError(
+                f"gamma0 の形状は {gamma_default.shape} である必要があります。"
+            )
+        if np.any(~np.isfinite(beta0)) or np.any(~np.isfinite(gamma0)):
+            raise ValueError("beta0 と gamma0 は有限値である必要があります。")
 
         # ADMM ソルバにより最適化し、推定値と ADMM の補助変数（z,u）と履歴を得る。
         beta, gamma, z, u, history = components.solver.solve(beta0, gamma0, X, T, delta)
+        history["initialization"] = {
+            "beta": "provided" if beta_was_provided else "default",
+            "gamma": "provided" if gamma_was_provided else "default",
+        }
 
         # 学習後属性（末尾 '_'）として結果を保持する。
         self.coef_ = beta
@@ -529,6 +558,8 @@ class ADMMHazardAFT:
             rho_update_interval=self.rho_update_interval,
             rho_min=self.rho_min,
             rho_max=self.rho_max,
+            fuse_penalty=self.fuse_penalty,
+            mcp_gamma=self.mcp_gamma,
         )
 
         # dataclass でコンポーネントをまとめて返す。

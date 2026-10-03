@@ -183,6 +183,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help="Path to existing result.json. If set, skip fit and run prediction only.",
     )
     parser.add_argument(
+        "--init-result",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a fitted result.json whose coef/gamma initialize a new fit "
+            "(for warm starts or initialization-sensitivity checks)."
+        ),
+    )
+    parser.add_argument(
         "--predict-times",
         type=str,
         default=None,
@@ -191,6 +200,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # 引数を解析する。argv が None なら OS のコマンドライン引数を使う。
     args = parser.parse_args(argv)
+    if args.load_result is not None and args.init_result is not None:
+        raise ValueError("--load-result と --init-result は同時に指定できません。")
 
     # 設定を読み込む。ファイル不在・拡張子非対応・パース失敗は例外として伝播する。
     config = load_config(args.config)
@@ -229,6 +240,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "output_path": str(args.output) if args.output is not None else None,
             "load_result": (
                 str(args.load_result) if args.load_result is not None else None
+            ),
+            "init_result": (
+                str(args.init_result) if args.init_result is not None else None
             ),
             "predict_times": args.predict_times,
             "plot": bool(args.plot),
@@ -322,8 +336,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # 設定辞書から推定器を構築する。
     # 余計なキーや型不一致があれば TypeError が発生し得る。
+    beta0 = None
+    gamma0 = None
+    initialization_source = "default"
+    if args.init_result is not None:
+        with args.init_result.open("r", encoding="utf-8") as handle:
+            init_result = json.load(handle)
+        if "coef" not in init_result or "gamma" not in init_result:
+            raise ValueError("--init-result に coef または gamma がありません。")
+        beta0 = np.asarray(init_result["coef"], dtype=float)
+        gamma0 = np.asarray(init_result["gamma"], dtype=float)
+        initialization_source = str(args.init_result)
+
     model = ADMMHazardAFT.from_config(config)
-    model.fit(X, y)
+    model.fit(X, y, beta0=beta0, gamma0=gamma0)
+    model.history_["initialization_source"] = initialization_source
     c_td_train = model.score(X, y)
     c_td_eval = None
     if eval_data is not None:
@@ -345,6 +372,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     last_obj = model.history_["objective"][-1] if model.history_["objective"] else None
     last_neg_loglik = (
         model.history_["neg_loglik"][-1] if model.history_["neg_loglik"] else None
+    )
+    last_penalty = (
+        model.history_["penalty"][-1] if model.history_.get("penalty") else None
     )
     last_pr = (
         model.history_["primal_residual"][-1]
@@ -368,6 +398,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     n_admm_iter = model.history_.get("n_admm_iter", len(model.history_["objective"]))
     lambda_fuse_scale = model.history_.get("lambda_fuse_scale")
     lambda_fuse_effective = model.history_.get("lambda_fuse_effective")
+    fuse_penalty = model.history_.get("fuse_penalty")
+    mcp_gamma = model.history_.get("mcp_gamma")
     returned_iter = model.history_.get("returned_iter")
     returned_from = model.history_.get("returned_from")
     converged = bool(model.history_.get("converged", False))
@@ -382,12 +414,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "primal_tolerance",
             "dual_tolerance",
             "rho",
+            "penalty",
         )
     }
     print(
         {
             "objective": last_obj,
             "neg_loglik": last_neg_loglik,
+            "penalty": last_penalty,
             "primal_residual": last_pr,
             "dual_residual": last_dr,
             "primal_tolerance": last_pr_tol,
@@ -400,6 +434,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "bic_eligible": bic_eligible,
             "lambda_fuse_scale": lambda_fuse_scale,
             "lambda_fuse_effective": lambda_fuse_effective,
+            "fuse_penalty": fuse_penalty,
+            "mcp_gamma": mcp_gamma,
+            "initialization_source": initialization_source,
             "c_td": c_td,
             "c_td_train": c_td_train,
             "c_td_test": c_td_eval,
@@ -449,6 +486,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "summary": {
                 "objective_last": last_obj,
                 "neg_loglik_last": last_neg_loglik,
+                "penalty_last": last_penalty,
                 "primal_residual_last": last_pr,
                 "dual_residual_last": last_dr,
                 "primal_tolerance_last": last_pr_tol,
@@ -464,15 +502,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "returned_primal_tolerance": returned_metrics["primal_tolerance"],
                 "returned_dual_tolerance": returned_metrics["dual_tolerance"],
                 "returned_rho": returned_metrics["rho"],
+                "returned_penalty": returned_metrics["penalty"],
                 "converged": converged,
                 "bic_eligible": bic_eligible,
                 "lambda_fuse_scale": lambda_fuse_scale,
                 "lambda_fuse_effective": lambda_fuse_effective,
+                "fuse_penalty": fuse_penalty,
+                "mcp_gamma": mcp_gamma,
+                "initialization_source": initialization_source,
                 "c_td": c_td,
                 "c_td_train": c_td_train,
                 "c_td_test": c_td_eval,
             },
             "config": config,
+            "initialization_source": initialization_source,
         }
         with output_path.open("w", encoding="utf-8") as handle:
             json.dump(result, handle, ensure_ascii=False, indent=2)

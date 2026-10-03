@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,12 @@ def main() -> None:
         help="Base ADMM config.",
     )
     parser.add_argument("--lambda-fuse", type=float, required=True)
+    parser.add_argument(
+        "--selection-file",
+        type=Path,
+        default=None,
+        help="Optional selected_lambda.json used to choose lambda_fuse.",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -97,8 +104,22 @@ def main() -> None:
             "lambda_fuse": float(args.lambda_fuse),
             "data_path": str(data_path),
             "data_meta_path": str(data_meta_path),
+            "lambda_selection_file": (
+                str(args.selection_file) if args.selection_file is not None else None
+            ),
         }
     )
+    if args.selection_file is not None:
+        with args.selection_file.open("r", encoding="utf-8") as handle:
+            selection = json.load(handle)
+        selected_lambda = float(selection["selected_lambda"])
+        if not math.isclose(
+            selected_lambda, args.lambda_fuse, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ValueError(
+                "lambda_fuse does not match selected_lambda in selection-file"
+            )
+        summary["lambda_selection"] = selection
 
     meta_path = args.output_dir / "full_data_meta.json"
     with meta_path.open("w", encoding="utf-8") as handle:

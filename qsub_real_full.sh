@@ -6,17 +6,16 @@
 #$ -j y
 #$ -N real_full
 
-#### Full real-data fit: DATASETS=support2,framingham × lambda_grid.json 10点 = 20 task
-#### lambda_grid.json の点数や DATASETS を変える場合は #$ -t も合わせて変更する。
-#$ -t 1-20:1
-#$ -tc 20
+#### CV-selected full fit: DATASETS=support2,framingham の各1 task = 2 task
+#$ -t 1-2:1
+#$ -tc 2
 
 #### 既定では Support2 と Framingham の両方を投げます。
 #### 片方だけ実行したい場合:
-####   qsub -v DATASETS=support2 qsub_real_full.sh   # この場合 #$ -t は 1-10 に変更
-####   qsub -v DATASETS=framingham qsub_real_full.sh # この場合 #$ -t は 1-10 に変更
+####   qsub -v DATASETS=support2 qsub_real_full.sh   # この場合 #$ -t は 1-1 に変更
+####   qsub -v DATASETS=framingham qsub_real_full.sh # この場合 #$ -t は 1-1 に変更
 ####
-#### 集計と可視化:
+#### 過去の全lambda/BICモード（LAMBDA_SELECTION_MODE=grid）の集計と可視化:
 ####   uv run scripts/real_cv/aggregate_full_results.py \
 ####     --base-dir outputs/real_full \
 ####     --output outputs/real_full/full_summary.csv

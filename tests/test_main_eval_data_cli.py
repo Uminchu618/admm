@@ -134,3 +134,30 @@ def test_main_eval_data_cli(tmp_path: Path) -> None:
         "primal_residual"
     ][returned_iter]
     assert payload["summary"]["bic_eligible"] is False
+
+    warm_output_path = tmp_path / "result_warm.json"
+    warm_command = command[:-1] + [
+        str(warm_output_path),
+        "--init-result",
+        str(output_path),
+    ]
+    warm_completed = subprocess.run(
+        warm_command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if warm_completed.returncode != 0:
+        raise AssertionError(
+            "CLI execution with --init-result failed:\n"
+            f"stdout:\n{warm_completed.stdout}\n\n"
+            f"stderr:\n{warm_completed.stderr}"
+        )
+    warm_payload = json.loads(warm_output_path.read_text(encoding="utf-8"))
+    assert warm_payload["initialization_source"] == str(output_path)
+    assert warm_payload["summary"]["initialization_source"] == str(output_path)
+    assert warm_payload["history"]["initialization"] == {
+        "beta": "provided",
+        "gamma": "provided",
+    }

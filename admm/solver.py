@@ -23,6 +23,71 @@ from .objective import HazardAFTObjective
 from .types import ArrayLike
 
 
+def mcp_penalty(
+    values: ArrayLike,
+    lambda_fuse: float,
+    gamma: float,
+) -> np.ndarray:
+    """MCP 罰則 ``p_{lambda,gamma}(|values|)`` を成分ごとに返す。"""
+
+    lambda_value = float(lambda_fuse)
+    gamma_value = float(gamma)
+    if not np.isfinite(lambda_value) or lambda_value < 0.0:
+        raise ValueError("lambda_fuse は 0 以上の有限値である必要があります。")
+    if not np.isfinite(gamma_value) or gamma_value <= 1.0:
+        raise ValueError("mcp_gamma は 1 より大きい有限値である必要があります。")
+
+    theta = np.abs(np.asarray(values, dtype=float))
+    if np.any(~np.isfinite(theta)):
+        raise ValueError("MCP 罰則の入力は有限値である必要があります。")
+    boundary = gamma_value * lambda_value
+    return np.where(
+        theta <= boundary,
+        lambda_value * theta - theta * theta / (2.0 * gamma_value),
+        0.5 * gamma_value * lambda_value * lambda_value,
+    )
+
+
+def firm_threshold(
+    values: ArrayLike,
+    lambda_fuse: float,
+    gamma: float,
+    rho: float,
+) -> np.ndarray:
+    """ADMM の MCP z-step に対応する firm-thresholding を返す。
+
+    ``argmin_z p_{lambda,gamma}(|z|) + rho/2 * (z-v)^2`` の閉形式解。
+    一意な内部解を持つため ``gamma * rho > 1`` を要求する。
+    """
+
+    lambda_value = float(lambda_fuse)
+    gamma_value = float(gamma)
+    rho_value = float(rho)
+    if not np.isfinite(lambda_value) or lambda_value < 0.0:
+        raise ValueError("lambda_fuse は 0 以上の有限値である必要があります。")
+    if not np.isfinite(gamma_value) or gamma_value <= 1.0:
+        raise ValueError("mcp_gamma は 1 より大きい有限値である必要があります。")
+    if not np.isfinite(rho_value) or rho_value <= 0.0:
+        raise ValueError("rho は正の有限値である必要があります。")
+    if gamma_value * rho_value <= 1.0:
+        raise ValueError("MCP の z-step には mcp_gamma * rho > 1 が必要です。")
+
+    v = np.asarray(values, dtype=float)
+    if np.any(~np.isfinite(v)):
+        raise ValueError("firm-thresholding の入力は有限値である必要があります。")
+    absolute = np.abs(v)
+    lower = lambda_value / rho_value
+    upper = gamma_value * lambda_value
+    middle = np.sign(v) * (absolute - lower) / (
+        1.0 - 1.0 / (gamma_value * rho_value)
+    )
+    return np.where(
+        absolute <= lower,
+        0.0,
+        np.where(absolute <= upper, middle, v),
+    )
+
+
 def _normalized_residual(residual: float, tolerance: float) -> float:
     """停止許容誤差に対する残差比を返す。"""
 
@@ -79,6 +144,8 @@ class FusedLassoADMMSolver:
         rho_update_interval: int = 10,
         rho_min: float = 1e-6,
         rho_max: float = 1e6,
+        fuse_penalty: str = "lasso",
+        mcp_gamma: float = 3.0,
     ) -> None:
         # objective: 近似対数尤度の value と β/γ の勾配・ヘッセを提供する目的関数。
         self.objective = objective
@@ -121,6 +188,10 @@ class FusedLassoADMMSolver:
         self.rho_update_interval = rho_update_interval
         self.rho_min = rho_min
         self.rho_max = rho_max
+
+        # fuse_penalty: 隣接差へ課す罰則（lasso または MCP）。
+        self.fuse_penalty = fuse_penalty
+        self.mcp_gamma = mcp_gamma
 
         # random_state: 初期化や乱数を使う場合の再現性のためのシード。
         self.random_state = random_state
@@ -183,12 +254,16 @@ class FusedLassoADMMSolver:
 
         n_samples = int(X_array.shape[0])
         lambda_fuse = float(self.lambda_fuse)
-        if lambda_fuse < 0.0:
-            raise ValueError("lambda_fuse は 0 以上である必要があります。")
+        if not np.isfinite(lambda_fuse) or lambda_fuse < 0.0:
+            raise ValueError("lambda_fuse は 0 以上の有限値である必要があります。")
         # objective.value は -log L のサンプル和なので O(N)。
         # (1/N) loss + lambda P と同じ解になるよう、loss + N*lambda P を解く。
         lambda_fuse_effective = float(n_samples) * lambda_fuse
         rho_current = float(self.rho)
+        fuse_penalty = str(self.fuse_penalty).strip().lower()
+        if fuse_penalty not in {"lasso", "mcp"}:
+            raise ValueError("fuse_penalty は 'lasso' または 'mcp' で指定してください。")
+        mcp_gamma = float(self.mcp_gamma)
 
         K, n_beta = beta.shape
         if X_array.shape[1] != K:
@@ -205,6 +280,13 @@ class FusedLassoADMMSolver:
             raise ValueError("line_search_max_steps は正の整数である必要があります。")
         if not np.isfinite(rho_current) or rho_current <= 0.0:
             raise ValueError("rho は正の有限値である必要があります。")
+        if fuse_penalty == "mcp":
+            # gamma 自体と z-step の狭義凸条件を、反復開始前に明示的に確認する。
+            mcp_penalty(np.zeros(1, dtype=float), lambda_fuse_effective, mcp_gamma)
+            if mcp_gamma * rho_current <= 1.0:
+                raise ValueError(
+                    "MCP の z-step には mcp_gamma * rho > 1 が必要です。"
+                )
         if not (0.0 < float(self.line_search_shrink) < 1.0):
             raise ValueError("line_search_shrink は (0,1) の範囲である必要があります。")
         if not (0.0 < float(self.line_search_c1) < 1.0):
@@ -248,6 +330,19 @@ class FusedLassoADMMSolver:
 
         def soft_threshold(v: np.ndarray, thresh: float) -> np.ndarray:
             return np.sign(v) * np.maximum(np.abs(v) - thresh, 0.0)
+
+        def fused_penalty_value(differences: np.ndarray) -> float:
+            if fuse_penalty == "mcp":
+                return float(
+                    np.sum(
+                        mcp_penalty(
+                            differences,
+                            lambda_fuse_effective,
+                            mcp_gamma,
+                        )
+                    )
+                )
+            return float(lambda_fuse_effective * np.sum(np.abs(differences)))
 
         def safe_base_value(beta_mat: np.ndarray, gamma_vec: np.ndarray) -> float:
             value = float(
@@ -315,11 +410,14 @@ class FusedLassoADMMSolver:
             "beta_step_norm": [],
             # γ 更新量のノルム（damped Newton のステップ長を含む）
             "gamma_step_norm": [],
+            # 目的関数中の fused penalty と MCP z-step の曲率余裕。
+            "penalty": [],
+            "mcp_convexity_margin": [],
         }
 
         d_beta_init = diff_beta(beta)
         init_obj = safe_base_value(beta, gamma)
-        init_obj += float(lambda_fuse_effective * np.sum(np.abs(d_beta_init)))
+        init_obj += fused_penalty_value(d_beta_init)
         best_objective = float(init_obj)
         best_beta = beta.copy()
         best_gamma = gamma.copy()
@@ -569,7 +667,17 @@ class FusedLassoADMMSolver:
             z_prev = z.copy()
             if n_penalized > 0 and diff_len > 0:
                 d_beta = diff_beta(beta)
-                z = soft_threshold(d_beta + u, lambda_fuse_effective / rho_current)
+                if fuse_penalty == "mcp":
+                    z = firm_threshold(
+                        d_beta + u,
+                        lambda_fuse_effective,
+                        mcp_gamma,
+                        rho_current,
+                    )
+                else:
+                    z = soft_threshold(
+                        d_beta + u, lambda_fuse_effective / rho_current
+                    )
                 u = u + d_beta - z
             else:
                 d_beta = diff_beta(beta)
@@ -596,7 +704,7 @@ class FusedLassoADMMSolver:
 
             # 履歴を記録（目的関数は最小化対象として扱う）
             base_value = safe_base_value(beta, gamma)
-            penalty = float(lambda_fuse_effective * np.sum(np.abs(d_beta)))
+            penalty = fused_penalty_value(d_beta)
             total_objective = base_value + penalty
             if (
                 previous_objective is not None
@@ -620,6 +728,12 @@ class FusedLassoADMMSolver:
             history["newton_steps"].append(int(newton_steps))
             history["beta_step_norm"].append(beta_step_norm)
             history["gamma_step_norm"].append(gamma_step_norm)
+            history["penalty"].append(penalty)
+            history["mcp_convexity_margin"].append(
+                float(rho_current - 1.0 / mcp_gamma)
+                if fuse_penalty == "mcp"
+                else None
+            )
             history["rho_next"].append(float(rho_current))
             history["rho_update"].append("none")
             history["rho_update_trigger"].append("none")
@@ -693,10 +807,16 @@ class FusedLassoADMMSolver:
                         float(self.rho_max),
                     )
                 elif rho_update == "decrease":
-                    rho_current = max(
+                    proposed_rho = max(
                         rho_old / float(self.rho_decrease_factor),
                         float(self.rho_min),
                     )
+                    # MCP の曲率境界ぎりぎりでは firm-threshold の分母が
+                    # 不安定になるため、境界を越える減少は採用しない。
+                    if fuse_penalty == "mcp" and mcp_gamma * proposed_rho <= 1.0:
+                        rho_current = rho_old
+                    else:
+                        rho_current = proposed_rho
                 if rho_current != rho_old:
                     u *= rho_old / rho_current
                     stagnation_count = 0
@@ -758,6 +878,8 @@ class FusedLassoADMMSolver:
         history["lambda_fuse"] = lambda_fuse
         history["lambda_fuse_scale"] = n_samples
         history["lambda_fuse_effective"] = lambda_fuse_effective
+        history["fuse_penalty"] = fuse_penalty
+        history["mcp_gamma"] = mcp_gamma if fuse_penalty == "mcp" else None
         history["best_iter"] = int(best_iter) if best_iter >= 0 else None
         history["used_best_iterate"] = used_best_iterate
         history["returned_iter"] = returned_iter
@@ -779,6 +901,7 @@ class FusedLassoADMMSolver:
             "primal_tolerance",
             "dual_tolerance",
             "rho",
+            "penalty",
         )
         for key in returned_metric_keys:
             values = history[key]

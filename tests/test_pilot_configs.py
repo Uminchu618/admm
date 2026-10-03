@@ -62,8 +62,15 @@ def test_pilot_scenario_configs() -> None:
     solver_config = tomllib.loads(
         (config_dir / "diagnostic_config.toml").read_text(encoding="utf-8")
     )
+    mcp_config = tomllib.loads(
+        (config_dir / "mcp_config.toml").read_text(encoding="utf-8")
+    )
     assert solver_config["adaptive_rho"] is True
+    assert solver_config["fuse_penalty"] == "lasso"
     assert solver_config["newton_steps_per_admm"] == 5
     assert solver_config["rho_update_interval"] == 5
     assert solver_config["rho_balance_mu"] == 10.0
     assert solver_config["max_admm_iter"] == 1000
+    assert mcp_config["fuse_penalty"] == "mcp"
+    assert mcp_config["mcp_gamma"] == 3.0
+    assert mcp_config["rho"] * mcp_config["mcp_gamma"] > 1.0

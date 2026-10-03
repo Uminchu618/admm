@@ -162,6 +162,9 @@ def build_scenario_figure(
     root: Path,
     true_grid: np.ndarray,
     truth: np.ndarray,
+    *,
+    selection_label: str = "BIC-selected estimate",
+    title_selection_label: str = "BIC-selected",
 ) -> tuple[plt.Figure, list[dict[str, object]]]:
     loaded: list[tuple[object, np.ndarray, np.ndarray, Path, float]] = []
     records: list[dict[str, object]] = []
@@ -180,7 +183,11 @@ def build_scenario_figure(
                 "scenario": scenario,
                 "seed": int(row.seed),
                 "lambda_fuse": float(row.lambda_fuse),
-                "bic": float(row.bic),
+                "bic": (
+                    float(row.bic)
+                    if hasattr(row, "bic") and pd.notna(row.bic)
+                    else np.nan
+                ),
                 "c_td_test": getattr(row, "c_td_test", np.nan),
                 "coefficient_rmise": rmise,
                 "result_path": str(result_path.relative_to(root)),
@@ -220,7 +227,7 @@ def build_scenario_figure(
                 where="post",
                 color=color,
                 linewidth=2.0,
-                label="BIC-selected estimate",
+                label=selection_label,
                 zorder=2,
             )
             true_changes = true_grid[1:-1][
@@ -264,7 +271,7 @@ def build_scenario_figure(
         frameon=False,
     )
     fig.suptitle(
-        f"{LABELS[scenario]}: true and BIC-selected coefficient functions",
+        f"{LABELS[scenario]}: true and {title_selection_label} coefficient functions",
         y=1.015,
         fontsize=15,
         fontweight="bold",
@@ -277,7 +284,7 @@ def write_report(records: pd.DataFrame, scenarios: list[str], output_path: Path)
     lines = [
         "# BIC選択係数関数と真値の比較",
         "",
-        "黒破線が生成時の真値、色付き実線が正式収束した候補のうちBIC最小の推定値である。",
+        "黒破線が生成時の真値、色付き実線が収束判定を満たした候補のうちBIC最小の推定値である。",
         "各行はseed、各列は係数を表し、右列に選択lambdaと係数RMISEを示す。",
         "",
     ]
