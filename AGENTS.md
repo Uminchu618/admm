@@ -26,14 +26,22 @@
 
 ## データ形式
 
-`main.py` とブートストラップは long format CSV を前提にします。
+`main.py` は1人1行CSVと long format CSV を受け付けます。
+ブートストラップCLIは引き続き long format CSV を前提にします。
+
+- 1人1行CSVの必須列は `id`, `time`, `event` で、`k` 列を持ちません。idは重複できません。
+- 1人1行入力では `X.shape == (n_subjects, p)` とし、fit内部でconfigの全K区間へ展開します。
+- 1人1行CSVでは `<data>.meta.json` の `time_grid` はconfigを上書きしません。
+- 学習用の3次元入力のKと `time_grid` の区間数が違う場合はエラーです。自動切り詰めはしません。
+
+long format の仕様:
 
 - 必須列: `id`, `k`, `time`, `event`
 - 追加列: 特徴量列。`id`, `k`, `time`, `event`, `time_true`, `c1`, `c2` は特徴量から除外します。
 - 各 `id` は `k = 0..K-1` のちょうど `K` 行を持つ必要があります。
 - `main.py` 内では `X.shape == (n_subjects, K, p)`、`y.shape == (n_subjects, 2)` に変換します。
 - `y[:, 0]` は観測時刻、`y[:, 1]` は event 0/1 です。
-- `<data>.meta.json` に `time_grid` があれば、config の `time_grid` より優先されます。
+- long format の `<data>.meta.json` に `time_grid` があれば、config の `time_grid` より優先されます。
 
 予測 API は 2D `X.shape == (n, p)` も受け取り、その場合は全区間に同じ特徴量を繰り返します。3D 入力では `coef_` と同じ `K` が必要です。
 

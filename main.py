@@ -33,13 +33,13 @@ from admm.model import ADMMHazardAFT
 
 
 @dataclass
-class LongFormatDataset:
-    """main.py が扱う long format CSV を NumPy 配列にしたもの。"""
+class CSVDataset:
+    """1人1行または long format CSV を NumPy 配列にしたもの。"""
 
     X: np.ndarray
     y: np.ndarray
     feature_cols: list[str]
-    k_count: int
+    k_count: int | None
     n_subjects: int
 
 
@@ -61,15 +61,15 @@ def _parse_predict_times(raw: Optional[str]) -> Optional[list[float]]:
     return times
 
 
-def _load_long_format_dataset(data_path: Path) -> LongFormatDataset:
-    """long format CSV を ADMMHazardAFT の入力配列へ変換する。"""
+def _load_dataset(data_path: Path) -> CSVDataset:
+    """k 列があれば long format、なければ1人1行として読み込む。"""
 
     data = pd.read_csv(data_path)
-    required_cols = {"id", "k", "time", "event"}
+    required_cols = {"id", "time", "event"}
     if not required_cols.issubset(data.columns):
         missing = sorted(required_cols - set(data.columns))
         raise ValueError(
-            f"Missing required columns in {data_path} (long format): {missing}"
+            f"Missing required columns in {data_path}: {missing}"
         )
 
     feature_cols = [
@@ -86,6 +86,22 @@ def _load_long_format_dataset(data_path: Path) -> LongFormatDataset:
             "c2",
         }
     ]
+
+    if data.empty:
+        raise ValueError(f"Empty dataset: {data_path}")
+    if data["id"].isna().any():
+        raise ValueError("id must not contain missing values")
+    if "k" not in data.columns:
+        if data["id"].duplicated().any():
+            raise ValueError("One-row-per-subject CSV must contain unique ids")
+        data_sorted = data.sort_values("id").reset_index(drop=True)
+        return CSVDataset(
+            X=data_sorted[feature_cols].to_numpy(),
+            y=data_sorted[["time", "event"]].to_numpy(),
+            feature_cols=feature_cols,
+            k_count=None,
+            n_subjects=len(data_sorted),
+        )
 
     data_sorted = data.sort_values(["id", "k"]).reset_index(drop=True)
     k_values = data_sorted["k"].to_numpy()
@@ -111,7 +127,7 @@ def _load_long_format_dataset(data_path: Path) -> LongFormatDataset:
     y_rows = data_sorted.iloc[::k_count]
     y = y_rows[["time", "event"]].to_numpy()
 
-    return LongFormatDataset(
+    return CSVDataset(
         X=X,
         y=y,
         feature_cols=feature_cols,
@@ -150,7 +166,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "--data",
         type=Path,
         default=Path("data/simulated_data.csv"),
-        help="Path to a CSV dataset (must include time/event columns).",
+        help="CSV with id/time/event columns; optional k column selects long format.",
     )
 
     # --output 引数:
@@ -166,7 +182,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "--eval-data",
         type=Path,
         default=None,
-        help="Optional long-format CSV used only for evaluation after fitting.",
+        help="Optional one-row-per-subject or long-format evaluation CSV.",
     )
 
     # --plot 引数:
@@ -221,11 +237,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # データを読み込み、fit を呼び出す（fit 本体は未実装のため例外はそのまま伝播する）。
     data_path = args.data
+    train_data = _load_dataset(data_path)
     meta_path = Path(f"{data_path}.meta.json")
     if meta_path.exists():
         with meta_path.open("r", encoding="utf-8") as handle:
             meta = json.load(handle)
-        if "time_grid" in meta:
+        if train_data.k_count is not None and "time_grid" in meta:
             config["time_grid"] = meta["time_grid"]
 
     # 実行パラメータを表示してから実行する。
@@ -250,17 +267,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         }
     )
 
-    train_data = _load_long_format_dataset(data_path)
     X = train_data.X
     y = train_data.y
     feature_cols = train_data.feature_cols
 
     eval_data = None
     if args.eval_data is not None:
-        eval_data = _load_long_format_dataset(args.eval_data)
+        eval_data = _load_dataset(args.eval_data)
         if eval_data.feature_cols != feature_cols:
             raise ValueError("eval-data の特徴量列が train data と一致しません。")
-        if eval_data.k_count != train_data.k_count:
+        if (
+            eval_data.k_count is not None
+            and train_data.k_count is not None
+            and eval_data.k_count != train_data.k_count
+        ):
             raise ValueError("eval-data の K が train data と一致しません。")
 
     prediction_times = _parse_predict_times(args.predict_times)
@@ -291,7 +311,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print(
             {
                 "n_samples": int(X.shape[0]),
-                "n_features": int(X.shape[2]),
+                "n_features": len(feature_cols),
                 "n_times": int(times_out.size),
                 "times": times_out.tolist(),
                 "c_td": c_td,
@@ -309,7 +329,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "data_path": str(data_path),
                 "loaded_result_path": str(args.load_result),
                 "n_samples": int(X.shape[0]),
-                "n_features": int(X.shape[2]),
+                "n_features": len(feature_cols),
                 "feature_cols": feature_cols,
                 "time_grid": list(map(float, model.time_grid_)),
                 "predict_times": times_out.tolist(),
@@ -325,7 +345,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             wandb_logger.log_metrics(
                 {
                     "n_samples": int(X.shape[0]),
-                    "n_features": int(X.shape[2]),
+                    "n_features": len(feature_cols),
                     "n_times": int(times_out.size),
                     "c_td": c_td,
                 },
@@ -476,7 +496,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "n_eval_samples": (
                 int(eval_data.X.shape[0]) if eval_data is not None else None
             ),
-            "n_features": int(X.shape[2]),
+            "n_features": len(feature_cols),
             "feature_cols": feature_cols,
             "time_grid": list(map(float, time_grid)),
             "coef": coef.tolist(),

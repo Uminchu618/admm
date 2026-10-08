@@ -197,6 +197,37 @@ Q = 5                    # 求積点数
 rule = "gauss_legendre"  # 求積法
 ```
 
+## 1人1行の入力
+
+時間によって共変量が変わらないデータは、`k` 列なしの1人1行CSVで
+`main.py` に渡せます。必須列は `id`, `time`, `event` で、idは重複できません。
+特徴量から除外する列は既存long formatと同じです。
+
+```csv
+id,time,event,AGE,SEX,BMI,SYSBP,DIABP
+2448,6.0,0,-1.09396,1,0.55252,-1.25089,-0.96352
+```
+
+```bash
+uv run main.py --config config.toml --data subjects.csv --output result.json
+```
+
+Kは `len(time_grid) - 1` で決まり、学習時に同じ共変量を全区間へ展開します。
+`ADMMHazardAFT.fit()` も2次元 `(n, p)` を受け付けます。
+上記の `[0, 1, 2, 3, 4, 5, 6]` はK=6です。
+同じ観測期間でKだけを変更する場合は、CSVの時間スケールを固定し、configの
+`time_grid` の内部の分割点だけを変更します。1人1行CSVでは横の
+`meta.json` の `time_grid` はconfigを上書きしません。
+
+`--eval-data` と予測専用の `--load-result` でも1人1行CSVを使えます。
+既存の `k` 列付きlong formatも利用できますが、学習入力のKとconfigの
+区間数の不一致はエラーになります。従来の自動切り詰めは行いません。
+long formatでは従来どおりCSV横の `meta.json` の `time_grid` が優先され、
+予測専用実行では保存したモデルの時間分割を使います。
+
+実データCVの前処理スクリプトとブートストラップCLIは、現時点では
+従来のlong formatを使います。既存のCSVや実験結果を変換・上書きする必要はありません。
+
 ## テスト
 
 ```bash

@@ -158,14 +158,14 @@ class ADMMHazardAFT:
         """モデルを学習する。
 
         Args:
-            X: 特徴量行列（想定: (n, p)）。型は現時点では ArrayLike（Any）。
+            X: 時間不変の特徴量 (n, p)、または区間別の特徴量 (n, K, p)。
             y: 目的変数。推奨は (time, event) の2列（y[:,0]=T, y[:,1]=delta）。
 
         Returns:
             self（sklearn の規約）。
 
         Raises:
-            NotImplementedError: 入力検証や初期化が未実装のため、現状では途中で失敗する。
+            ValueError: 入力の形状・値が不正な場合。
         """
 
         # 入力検証: X と y を整形し、観測時刻 T と打ち切り指示 delta に分解する。
@@ -174,7 +174,7 @@ class ADMMHazardAFT:
         # 入力次元（特徴量数）を保持する。
         self.n_features_in_ = int(X.shape[2])
 
-        # time_grid を有効区間に合わせて保持する。
+        # 検証した time_grid を保持する。
         self.time_grid_ = tuple(time_grid_effective)
 
         # 内部コンポーネント（baseline/time_partition/quadrature/objective/solver）を構築する。
@@ -394,8 +394,8 @@ class ADMMHazardAFT:
 
         行う検証・変換:
         - X:
-            - (n, K, p) を要求
-            - K が time_grid と異なる場合は min(K) に切り詰める
+            - (n, p) は time_grid の全区間に同じ特徴量を展開する
+            - (n, K, p) は K と time_grid の区間数の一致を要求する
         - y:
             - (n, 2) 形式（time, event）であることを要求
             - time 列は float へ変換可能で、有限（NaN/inf なし）かつ非負であること
@@ -404,7 +404,7 @@ class ADMMHazardAFT:
               - 戻り値では int にキャストして返す
 
         Args:
-            X: 特徴量。形状 (n, K, p) を要求。
+            X: 特徴量。形状 (n, p) または (n, K, p)。
             y: 目的変数。形状 (n, 2) を要求（1列目=観測時刻 time, 2列目=イベント指示 event）。
 
         Returns:
@@ -412,7 +412,7 @@ class ADMMHazardAFT:
             - X_array: 形状 (n, K, p) の NumPy 配列
             - T: 形状 (n,) の float 配列（観測時刻）
             - delta: 形状 (n,) の int 配列（0/1）
-            - time_grid_effective: 有効区間に切り詰めた time_grid
+            - time_grid_effective: 設定された time_grid
 
         Raises:
             ValueError: 形状不正、型変換不能、NaN/inf、負の time、event が 0/1 以外、など。
@@ -421,8 +421,8 @@ class ADMMHazardAFT:
         # X を NumPy 配列に正規化する（リスト/タプル等も受け取れるようにするため）。
         X_array = np.asarray(X, dtype=float)
 
-        if X_array.ndim != 3:
-            raise ValueError("X は 3 次元配列（n, K, p）である必要があります。")
+        if X_array.ndim not in (2, 3):
+            raise ValueError("X は 2 次元 (n, p) または 3 次元 (n, K, p) 配列である必要があります。")
         if np.any(~np.isfinite(X_array)):
             raise ValueError("X に無限大または NaN が含まれています。")
 
@@ -439,13 +439,11 @@ class ADMMHazardAFT:
         if len(time_grid) < 2:
             raise ValueError("time_grid は 2 点以上である必要があります。")
         k_expected = len(time_grid) - 1
-        k_data = int(X_array.shape[1])
-        k_effective = min(k_expected, k_data)
-        if k_effective <= 0:
-            raise ValueError("K は 1 以上である必要があります。")
-        if k_data != k_effective:
-            X_array = X_array[:, :k_effective, :]
-        time_grid_effective = time_grid[: k_effective + 1]
+        if X_array.ndim == 2:
+            X_array = np.repeat(X_array[:, None, :], k_expected, axis=1)
+        elif X_array.shape[1] != k_expected:
+            raise ValueError("X の K 次元が time_grid の区間数と一致しません。")
+        time_grid_effective = time_grid
         # time 列を float に変換する。変換不能（文字列等）の場合は例外を握りつぶさず原因を付与する。
         try:
             T = y_array[:, 0].astype(float)
