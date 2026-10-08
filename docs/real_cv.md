@@ -1,5 +1,9 @@
 # Real-data cross-validation
 
+Framinghamで時間分割数Kとlambdaを同時に探索する場合は
+[framingham_klambda_cv.md](framingham_klambda_cv.md) を参照。
+1人1行のfoldデータを全候補で共有し、SGEタスク数を自動計算する。
+
 MCP罰則・シミュレーションと同じ9点のlambda gridを使う
 Framingham/SUPPORT2の実験は [real_mcp_cv.md](real_mcp_cv.md) を参照。
 

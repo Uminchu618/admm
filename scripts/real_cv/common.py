@@ -135,17 +135,19 @@ def to_long_format(base: pd.DataFrame, k_count: int, feature_cols: list[str]) ->
     return long_df.sort_values(["id", "k"]).reset_index(drop=True)
 
 
-def build_fold_long_data(
+def build_fold_subject_data(
     base: pd.DataFrame,
     assignments: pd.DataFrame,
     fold: int,
-    time_grid: np.ndarray,
+    time_range: np.ndarray,
     spec: RealDatasetSpec,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
-    """指定 fold の train/test long format とメタ情報を作る。"""
+    """指定foldを1人1行へ前処理する。時間分割数には依存しない。"""
 
     if fold < 0:
         raise ValueError("fold must be non-negative")
+    if base["id"].duplicated().any() or assignments["id"].duplicated().any():
+        raise ValueError("base and assignments must contain unique ids")
 
     merged = base.merge(assignments[["id", "fold"]], on="id", how="inner")
     if merged["id"].nunique() != base["id"].nunique():
@@ -162,9 +164,7 @@ def build_fold_long_data(
         continuous_cols=spec.continuous_feature_cols,
     )
 
-    t0 = float(time_grid[0])
-    tK = float(time_grid[-1])
-    k_count = int(time_grid.size - 1)
+    t0, tK = _validate_time_range(time_range)
     time_scale_max = (
         float(spec.time_scale_max)
         if spec.time_scale_max is not None
@@ -176,22 +176,22 @@ def build_fold_long_data(
     train_base = _add_scaled_outcome(train_base, t0, tK, time_scale_max)
     test_base = _add_scaled_outcome(test_base, t0, tK, time_scale_max)
 
-    train_long = to_long_format(train_base, k_count, spec.feature_cols)
-    test_long = to_long_format(test_base, k_count, spec.feature_cols)
+    columns = ["id", "time", "event", *spec.feature_cols]
+    train_subjects = train_base[columns].sort_values("id").reset_index(drop=True)
+    test_subjects = test_base[columns].sort_values("id").reset_index(drop=True)
 
     summary = {
         "dataset": spec.name,
         "fold": int(fold),
-        "K": k_count,
-        "time_grid": time_grid.tolist(),
+        "time_range": [t0, tK],
         "t0": t0,
         "tK": tK,
         "n_train": int(train_base.shape[0]),
         "n_test": int(test_base.shape[0]),
         "n_train_events": int(train_base["event"].sum()),
         "n_test_events": int(test_base["event"].sum()),
-        "train_rows": int(train_long.shape[0]),
-        "test_rows": int(test_long.shape[0]),
+        "train_rows": int(train_subjects.shape[0]),
+        "test_rows": int(test_subjects.shape[0]),
         "time_scale_max_original": time_scale_max,
         "raw_feature_cols": spec.raw_feature_cols,
         "feature_cols": spec.feature_cols,
@@ -200,6 +200,34 @@ def build_fold_long_data(
         "standardize_cols": spec.continuous_feature_cols,
         "standardization": standardization,
     }
+    return train_subjects, test_subjects, summary
+
+
+def _validate_time_range(time_range: np.ndarray) -> tuple[float, float]:
+    values = np.asarray(time_range, dtype=float)
+    if values.shape != (2,) or not np.isfinite(values).all():
+        raise ValueError("time_range must contain two finite endpoints")
+    if values[0] < 0 or values[1] <= values[0]:
+        raise ValueError("time_range must have nonnegative, increasing endpoints")
+    return float(values[0]), float(values[1])
+
+
+def build_fold_long_data(
+    base: pd.DataFrame,
+    assignments: pd.DataFrame,
+    fold: int,
+    time_grid: np.ndarray,
+    spec: RealDatasetSpec,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """既存CLI用のlong formatを、共通の1人1行前処理から作る。"""
+    train, test, summary = build_fold_subject_data(
+        base, assignments, fold, np.asarray(time_grid)[[0, -1]], spec
+    )
+    k_count = len(time_grid) - 1
+    train_long = to_long_format(train, k_count, spec.feature_cols)
+    test_long = to_long_format(test, k_count, spec.feature_cols)
+    summary.update(K=k_count, time_grid=time_grid.tolist(),
+                   train_rows=len(train_long), test_rows=len(test_long))
     return train_long, test_long, summary
 
 

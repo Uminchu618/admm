@@ -239,6 +239,13 @@ BIC は `2 * neg_loglik_last + n_params * log(n_samples)` で計算します。`
 
 ## 実データ CV
 
+FraminghamのK・lambda同時探索は `docs/framingham_klambda_cv.md` に従います。
+`scripts/real_cv/klambda_workflow.sh` のprepareで1人1行foldデータを一度作り、
+submitで `K × lambda × fold` を実行します。時間範囲は固定します。
+全候補が完了し、全fold収束・有限検証c_tdの組合せから平均c_td最大を選びます。
+同点は小さいK、次に大きいlambdaを優先します。確定値は `selected_params.json`。
+既存のlambdaだけのCVとは出力先を分けてください。
+
 `docs/real_cv.md` に従います。Support2 と Framingham は同じ実行コードを使い、dataset 固有の raw -> base 変換だけ `scripts/real_cv/datasets.py` に分けます。
 
 主要ファイル:

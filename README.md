@@ -199,6 +199,9 @@ rule = "gauss_legendre"  # 求積法
 
 ## 1人1行の入力
 
+FraminghamでKとlambdaを同時に選ぶスパコン実験は
+[K・lambda同時探索の手順](docs/framingham_klambda_cv.md) を参照してください。
+
 時間によって共変量が変わらないデータは、`k` 列なしの1人1行CSVで
 `main.py` に渡せます。必須列は `id`, `time`, `event` で、idは重複できません。
 特徴量から除外する列は既存long formatと同じです。
@@ -225,8 +228,9 @@ Kは `len(time_grid) - 1` で決まり、学習時に同じ共変量を全区間
 long formatでは従来どおりCSV横の `meta.json` の `time_grid` が優先され、
 予測専用実行では保存したモデルの時間分割を使います。
 
-実データCVの前処理スクリプトとブートストラップCLIは、現時点では
-従来のlong formatを使います。既存のCSVや実験結果を変換・上書きする必要はありません。
+従来の実データCVとブートストラップCLIはlong formatを使います。
+新しいK・lambda同時探索は1人1行を使います。
+既存のCSVや実験結果を変換・上書きする必要はありません。
 
 ## テスト
 
