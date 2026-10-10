@@ -88,33 +88,6 @@ def firm_threshold(
     )
 
 
-def _normalized_residual(residual: float, tolerance: float) -> float:
-    """停止許容誤差に対する残差比を返す。"""
-
-    if tolerance > 0.0:
-        return float(residual) / float(tolerance)
-    return 0.0 if residual <= 0.0 else float(np.inf)
-
-
-def _rho_balance_action(
-    *,
-    primal_residual: float,
-    dual_residual: float,
-    primal_tolerance: float,
-    dual_tolerance: float,
-    mu: float,
-) -> str:
-    """正規化残差を比較し、rho の更新方向を返す。"""
-
-    primal_ratio = _normalized_residual(primal_residual, primal_tolerance)
-    dual_ratio = _normalized_residual(dual_residual, dual_tolerance)
-    if primal_ratio > float(mu) * dual_ratio:
-        return "increase"
-    if dual_ratio > float(mu) * primal_ratio:
-        return "decrease"
-    return "none"
-
-
 class FusedLassoADMMSolver:
     """ADMM による fused lasso ソルバ（骨格）。"""
 
@@ -137,13 +110,6 @@ class FusedLassoADMMSolver:
         line_search_c1: float,
         return_best_iterate: bool,
         random_state: Optional[int],
-        adaptive_rho: bool = False,
-        rho_balance_mu: float = 10.0,
-        rho_increase_factor: float = 2.0,
-        rho_decrease_factor: float = 2.0,
-        rho_update_interval: int = 10,
-        rho_min: float = 1e-6,
-        rho_max: float = 1e6,
         fuse_penalty: str = "lasso",
         mcp_gamma: float = 3.0,
     ) -> None:
@@ -179,15 +145,6 @@ class FusedLassoADMMSolver:
         self.line_search_shrink = line_search_shrink
         self.line_search_c1 = line_search_c1
         self.return_best_iterate = return_best_iterate
-
-        # residual balancing による rho の適応更新。
-        self.adaptive_rho = adaptive_rho
-        self.rho_balance_mu = rho_balance_mu
-        self.rho_increase_factor = rho_increase_factor
-        self.rho_decrease_factor = rho_decrease_factor
-        self.rho_update_interval = rho_update_interval
-        self.rho_min = rho_min
-        self.rho_max = rho_max
 
         # fuse_penalty: 隣接差へ課す罰則（lasso または MCP）。
         self.fuse_penalty = fuse_penalty
@@ -301,16 +258,6 @@ class FusedLassoADMMSolver:
             raise ValueError("admm_stagnation_tol は 0 以上である必要があります。")
         if int(self.admm_stagnation_patience) <= 0:
             raise ValueError("admm_stagnation_patience は正の整数である必要があります。")
-        if float(self.rho_balance_mu) <= 1.0:
-            raise ValueError("rho_balance_mu は 1 より大きい必要があります。")
-        if float(self.rho_increase_factor) <= 1.0:
-            raise ValueError("rho_increase_factor は 1 より大きい必要があります。")
-        if float(self.rho_decrease_factor) <= 1.0:
-            raise ValueError("rho_decrease_factor は 1 より大きい必要があります。")
-        if int(self.rho_update_interval) <= 0:
-            raise ValueError("rho_update_interval は正の整数である必要があります。")
-        if float(self.rho_min) <= 0.0 or float(self.rho_max) < float(self.rho_min):
-            raise ValueError("rho_min/rho_max の範囲が不正です。")
 
         def diff_beta(beta_matrix: np.ndarray) -> np.ndarray:
             if diff_len == 0 or n_penalized == 0:
@@ -391,13 +338,8 @@ class FusedLassoADMMSolver:
             "primal_residual": [],
             # dual residual: ||ρ D^T (z^k - z^{k-1})||
             "dual_residual": [],
-            # ADMM ペナルティ係数 ρ（適応化する場合は更新後の値）
+            # 固定の ADMM ペナルティ係数 ρ
             "rho": [],
-            # 当該反復後の rho と更新方向。
-            "rho_next": [],
-            "rho_update": [],
-            # rho balancing を評価した契機（通常周期または停滞回避）。
-            "rho_update_trigger": [],
             # Boyd 型の停止判定で使う許容誤差（絶対 + 相対）
             "primal_tolerance": [],
             "dual_tolerance": [],
@@ -734,9 +676,6 @@ class FusedLassoADMMSolver:
                 if fuse_penalty == "mcp"
                 else None
             )
-            history["rho_next"].append(float(rho_current))
-            history["rho_update"].append("none")
-            history["rho_update_trigger"].append("none")
 
             if np.isfinite(total_objective) and total_objective < best_objective:
                 best_objective = float(total_objective)
@@ -767,65 +706,6 @@ class FusedLassoADMMSolver:
             ):
                 stopping_reason = "residual_converged"
                 break
-            # 停止許容誤差で正規化した residual balancing。scaled dual 変数 u は
-            # rho の変更前後で unscaled dual が不変になるよう補正する。
-            # 適応更新を停滞停止より先に行い、rho が変わった場合は新しい拡大罰則の
-            # 下で反復を継続できるよう停滞カウントをリセットする。通常の更新周期外で
-            # 停滞上限へ達した場合も一度 balancing を試し、次の周期更新直前での
-            # 早期停止を避ける。
-            interval_rho_update_due = (
-                (admm_iter + 1) % int(self.rho_update_interval) == 0
-            )
-            stagnation_rho_escape_due = (
-                stagnation_count >= stagnation_patience
-            )
-            rho_update_due = (
-                interval_rho_update_due or stagnation_rho_escape_due
-            )
-            should_update_rho = (
-                bool(self.adaptive_rho)
-                and rho_update_due
-                and (admm_iter + 1) < int(self.max_admm_iter)
-            )
-            if should_update_rho:
-                rho_update_trigger = (
-                    "interval"
-                    if interval_rho_update_due
-                    else "stagnation_escape"
-                )
-                rho_old = rho_current
-                rho_update = _rho_balance_action(
-                    primal_residual=primal_residual,
-                    dual_residual=dual_residual,
-                    primal_tolerance=primal_tolerance,
-                    dual_tolerance=dual_tolerance,
-                    mu=float(self.rho_balance_mu),
-                )
-                if rho_update == "increase":
-                    rho_current = min(
-                        rho_old * float(self.rho_increase_factor),
-                        float(self.rho_max),
-                    )
-                elif rho_update == "decrease":
-                    proposed_rho = max(
-                        rho_old / float(self.rho_decrease_factor),
-                        float(self.rho_min),
-                    )
-                    # MCP の曲率境界ぎりぎりでは firm-threshold の分母が
-                    # 不安定になるため、境界を越える減少は採用しない。
-                    if fuse_penalty == "mcp" and mcp_gamma * proposed_rho <= 1.0:
-                        rho_current = rho_old
-                    else:
-                        rho_current = proposed_rho
-                if rho_current != rho_old:
-                    u *= rho_old / rho_current
-                    stagnation_count = 0
-                    history["stagnation_count"][-1] = 0
-                else:
-                    rho_update = "none"
-                history["rho_next"][-1] = float(rho_current)
-                history["rho_update"][-1] = rho_update
-                history["rho_update_trigger"][-1] = rho_update_trigger
 
             if stagnation_count >= stagnation_patience:
                 stopping_reason = "stagnated"

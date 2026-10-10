@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-run_name="${PILOT_RUN_NAME:-adaptive_rho_normalized_stagnation_escape_newton5}"
+run_name="${PILOT_RUN_NAME:-fixed_rho_newton5}"
 
 export DATA_DIR="${PILOT_TRAIN_DIR:-$repo_root/data/pilot/train}"
 export EVAL_DATA_DIR="${PILOT_EVAL_DIR:-$repo_root/data/pilot/eval}"

@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 train_dir="${PILOT_TRAIN_DIR:-$repo_root/data/pilot/train}"
 eval_dir="${PILOT_EVAL_DIR:-$repo_root/data/pilot/eval}"
-run_name="${PILOT_RUN_NAME:-adaptive_rho_normalized_stagnation_escape_newton5}"
+run_name="${PILOT_RUN_NAME:-fixed_rho_newton5}"
 cv_output_dir="${PILOT_OUTPUT_DIR:-$repo_root/outputs/pilot_cv/$run_name}"
 refit_output_dir="${PILOT_REFIT_OUTPUT_DIR:-$repo_root/outputs/pilot_cv_refit/$run_name}"
 config_template="${PILOT_CONFIG_TEMPLATE:-$repo_root/generation/pilot/diagnostic_config.toml}"

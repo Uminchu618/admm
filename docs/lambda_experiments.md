@@ -202,7 +202,7 @@ uv run scripts/visualize_lambda_results.py \
 ## パイロット診断実験
 
 既存の `outputs/pilot` と分離して、Oracle・Fine-grid各3 seed、small lambda
-9点の54タスクを実行できます。既定設定は適応的rhoと
+9点の54タスクを実行できます。既定設定は固定rho（`rho=1.0`）と
 `newton_steps_per_admm=5`です。
 
 ```bash
@@ -211,21 +211,18 @@ uv run scripts/visualize_lambda_results.py \
 ```
 
 出力先は
-`outputs/pilot_diagnostic/adaptive_rho_normalized_stagnation_escape_newton5/`
+`outputs/pilot_diagnostic/fixed_rho_newton5/`
 です。
 集計後には `check_diagnostic.py` が54件の正式収束、返却残差、BIC候補、
 正則化経路の変化を検査し、不合格なら終了コード1を返します。
 
-適応的rhoは主・双対残差を各停止許容誤差で正規化して比較します。
-rhoを更新した反復では停滞カウントをリセットし、更新直後の早期停止を防ぎます。
-停滞上限へ達した場合は通常の更新周期外でも一度rho balancingを試し、rhoを
-変更できた場合は反復を継続します。rhoを変更できない場合だけ停滞停止します。
-固定rhoやNewtonステップ数を比較するときは、別のrun名を必ず指定して結果を分離します。
+rhoは全反復で固定し、停滞上限に達した場合は停滞停止します。
+rhoやNewtonステップ数を比較するときは、別のrun名を指定して結果を分離します。
+過去の適応的rhoによる結果は保持し、新しい実験は`fixed_rho_newton5`へ保存します。
 
 ```bash
 PILOT_DIAGNOSTIC_RUN=fixed_rho10_newton5 \
 DIAGNOSTIC_RHO=10 \
-DIAGNOSTIC_ADAPTIVE_RHO=false \
 DIAGNOSTIC_NEWTON_STEPS=5 \
 SGE_TASK_ID=1 \
 ./scripts/pilot/run_diagnostic_task.sh
@@ -233,17 +230,16 @@ SGE_TASK_ID=1 \
 
 ## 診断通過後の本パイロット
 
-第3次診断は54/54件で正式収束し、自動ゲートを通過しました。本パイロットは
+過去の適応的rhoによる第3次診断は54/54件で正式収束し、自動ゲートを通過しました。
+固定rhoによる収束は新しい診断実験で確認してください。本パイロットは
 Oracle、Fine-grid、Off-grid、Small、No-changeを各20反復、9 lambdaで実行するため、
 合計タスク数は `5 * 20 * 9 = 900` です。
 
-既定値は、診断で合格した次の条件へ固定されています。
+現在の既定値は次のとおりです。
 
 - lambda: `0, 0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.25`
-- `adaptive_rho = true`
+- 固定rho: `rho = 1.0`
 - `newton_steps_per_admm = 5`
-- `rho_update_interval = 5`
-- 停滞時の周期外rho balancingを有効化
 
 リモートでデータを生成した後、次の順に実行します。
 
@@ -260,10 +256,10 @@ SGEアレイ範囲を `1-900` として動的に指定します。出力は旧�
 次へ保存されます。
 
 ```text
-outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5/
-outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_summary.csv
-outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_gate.json
-outputs/pilot/adaptive_rho_normalized_stagnation_escape_newton5_visualizations/
+outputs/pilot/fixed_rho_newton5/
+outputs/pilot/fixed_rho_newton5_summary.csv
+outputs/pilot/fixed_rho_newton5_gate.json
+outputs/pilot/fixed_rho_newton5_visualizations/
 ```
 
 別名で再実行する場合は、投入・集計・可視化で同じ名前または明示パスを使います。
@@ -338,3 +334,13 @@ uv run scripts/aggregate_lambda_results.py | grep "Warning"
 - ハイパーパラメータ探索（rho、clip_etaなども並列化）
 - WandB統合による実験管理
 - 評価指標の自動計算・集計
+
+## 過去の設定との互換性
+
+適応的rhoの更新処理と公開引数は削除されています。`ADMMHazardAFT.from_config()`は、
+過去の設定や`result.json`に残る`adaptive_rho`、`rho_balance_mu`、
+`rho_increase_factor`、`rho_decrease_factor`、`rho_update_interval`、`rho_min`、
+`rho_max`を無視します。`rho`は保持し、再学習では固定値として使用します。
+過去の結果を使う予測・ブートストラップもこの経路で読み込めます。
+履歴の`rho`、`rho_final`、`returned_rho`は維持しますが、
+`rho_next`、`rho_update`、`rho_update_trigger`は新しい学習結果には出力しません。

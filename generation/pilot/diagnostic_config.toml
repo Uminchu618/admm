@@ -23,13 +23,6 @@ line_search_shrink = 0.5
 line_search_c1 = 1e-4
 return_best_iterate = true
 
-adaptive_rho = true
-rho_balance_mu = 10.0
-rho_increase_factor = 2.0
-rho_decrease_factor = 2.0
-rho_update_interval = 5
-rho_min = 1e-6
-rho_max = 1e6
 
 clip_eta = 20
 random_state = 1234

@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 data_dir="${PILOT_TRAIN_DIR:-$repo_root/data/pilot/train}"
-output_base_dir="${PILOT_REFINED_ADDITIONS_DIR:-$repo_root/outputs/pilot_cv_refined_additions/adaptive_rho_normalized_stagnation_escape_newton5}"
+output_base_dir="${PILOT_REFINED_ADDITIONS_DIR:-$repo_root/outputs/pilot_cv_refined_additions/fixed_rho_newton5}"
 manifest="${PILOT_REFINED_MANIFEST:?PILOT_REFINED_MANIFEST is required}"
 config_template="${PILOT_CONFIG_TEMPLATE:-$repo_root/generation/pilot/diagnostic_config.toml}"
 split_seed="${PILOT_SPLIT_SEED:-1234}"

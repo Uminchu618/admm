@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 
-DEFAULT_RUN = "adaptive_rho_normalized_stagnation_escape_newton5"
+DEFAULT_RUN = "fixed_rho_newton5"
 SCENARIOS = ["oracle", "fine_grid", "off_grid", "small", "no_change"]
 LABELS = {
     "oracle": "Oracle",

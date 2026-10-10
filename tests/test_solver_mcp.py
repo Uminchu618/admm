@@ -103,22 +103,3 @@ def test_solver_rejects_mcp_when_gamma_rho_is_not_greater_than_one() -> None:
     solver = _solver(rho=0.25, mcp_gamma=4.0)
     with pytest.raises(ValueError, match=r"mcp_gamma \* rho > 1"):
         solver.solve(*_inputs())
-
-
-def test_adaptive_rho_never_crosses_mcp_curvature_boundary() -> None:
-    solver = _solver(
-        lambda_fuse=0.0,
-        rho=1.0,
-        mcp_gamma=2.0,
-        adaptive_rho=True,
-        rho_balance_mu=2.0,
-        rho_decrease_factor=4.0,
-        rho_update_interval=1,
-        rho_min=1e-6,
-        max_admm_iter=2,
-    )
-
-    _, _, _, _, history = solver.solve(*_inputs())
-
-    assert all(rho > 0.5 for rho in history["rho"])
-    assert history["rho_final"] > 0.5

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-run_name="${PILOT_RUN_NAME:-adaptive_rho_normalized_stagnation_escape_newton5}"
+run_name="${PILOT_RUN_NAME:-fixed_rho_newton5}"
 coarse_cv_dir="${PILOT_OUTPUT_DIR:-$repo_root/outputs/pilot_cv/$run_name}"
 refined_dir="${PILOT_REFINED_OUTPUT_DIR:-$repo_root/outputs/pilot_cv_refined/$run_name}"
 additions_dir="${PILOT_REFINED_ADDITIONS_DIR:-$repo_root/outputs/pilot_cv_refined_additions/$run_name}"

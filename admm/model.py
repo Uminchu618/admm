@@ -78,13 +78,6 @@ class ADMMHazardAFT:
         return_best_iterate: bool = True,
         clip_eta: float = 20.0,
         random_state: Optional[int] = None,
-        adaptive_rho: bool = False,
-        rho_balance_mu: float = 10.0,
-        rho_increase_factor: float = 2.0,
-        rho_decrease_factor: float = 2.0,
-        rho_update_interval: int = 10,
-        rho_min: float = 1e-6,
-        rho_max: float = 1e6,
         fuse_penalty: str = "lasso",
         mcp_gamma: float = 3.0,
     ) -> None:
@@ -109,13 +102,6 @@ class ADMMHazardAFT:
         self.line_search_shrink = line_search_shrink
         self.line_search_c1 = line_search_c1
         self.return_best_iterate = return_best_iterate
-        self.adaptive_rho = adaptive_rho
-        self.rho_balance_mu = rho_balance_mu
-        self.rho_increase_factor = rho_increase_factor
-        self.rho_decrease_factor = rho_decrease_factor
-        self.rho_update_interval = rho_update_interval
-        self.rho_min = rho_min
-        self.rho_max = rho_max
         self.fuse_penalty = fuse_penalty
         self.mcp_gamma = mcp_gamma
         self.clip_eta = clip_eta
@@ -127,6 +113,7 @@ class ADMMHazardAFT:
 
         設定ファイル（TOML/JSON）をそのまま渡して生成できるようにするためのヘルパ。
         quadrature は入れ子辞書になりやすいため、明示的に取り出して __init__ に渡す。
+        過去の適応的 rho の設定キーは無視し、rho は固定値として使用する。
 
         Args:
             config: ハイパーパラメータ辞書。
@@ -140,6 +127,19 @@ class ADMMHazardAFT:
 
         # Mapping を直接変更しないよう、まず通常の dict にコピーする。
         config_dict = dict(config)
+
+        # 過去の設定・result.json に残る適応的 rho の設定は無視する。
+        # rho 自体は保持し、現在のソルバでは学習中の固定値として使う。
+        for obsolete_key in (
+            "adaptive_rho",
+            "rho_balance_mu",
+            "rho_increase_factor",
+            "rho_decrease_factor",
+            "rho_update_interval",
+            "rho_min",
+            "rho_max",
+        ):
+            config_dict.pop(obsolete_key, None)
 
         # quadrature はサブ辞書として持ちやすいので、明示的に分離する。
         quadrature = config_dict.pop("quadrature", None)
@@ -549,13 +549,6 @@ class ADMMHazardAFT:
             line_search_c1=self.line_search_c1,
             return_best_iterate=self.return_best_iterate,
             random_state=self.random_state,
-            adaptive_rho=self.adaptive_rho,
-            rho_balance_mu=self.rho_balance_mu,
-            rho_increase_factor=self.rho_increase_factor,
-            rho_decrease_factor=self.rho_decrease_factor,
-            rho_update_interval=self.rho_update_interval,
-            rho_min=self.rho_min,
-            rho_max=self.rho_max,
             fuse_penalty=self.fuse_penalty,
             mcp_gamma=self.mcp_gamma,
         )

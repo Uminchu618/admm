@@ -153,12 +153,12 @@ def main() -> None:
     parser.add_argument(
         "--summary",
         type=Path,
-        default=Path("outputs/pilot_diagnostic/adaptive_rho_newton5_summary.csv"),
+        default=Path("outputs/pilot_diagnostic/fixed_rho_newton5_summary.csv"),
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("docs/figures/pilot_diagnostic_adaptive_rho_newton5.png"),
+        default=Path("docs/figures/pilot_diagnostic_fixed_rho_newton5.png"),
     )
     args = parser.parse_args()
     plot_diagnostics(load_summary(args.summary), args.output)

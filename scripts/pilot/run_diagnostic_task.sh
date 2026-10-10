@@ -6,7 +6,7 @@ train_dir="${PILOT_TRAIN_DIR:-$repo_root/data/pilot/train}"
 eval_dir="${PILOT_EVAL_DIR:-$repo_root/data/pilot/eval}"
 lambda_grid="${PILOT_DIAGNOSTIC_LAMBDA_GRID:-$repo_root/generation/pilot/diagnostic_lambda_grid.json}"
 config_template="${PILOT_DIAGNOSTIC_CONFIG:-$repo_root/generation/pilot/diagnostic_config.toml}"
-run_name="${PILOT_DIAGNOSTIC_RUN:-adaptive_rho_normalized_stagnation_escape_newton5}"
+run_name="${PILOT_DIAGNOSTIC_RUN:-fixed_rho_newton5}"
 output_base="${PILOT_DIAGNOSTIC_OUTPUT_DIR:-$repo_root/outputs/pilot_diagnostic/$run_name}"
 uv_bin="${UV_BIN:-/home/sagara/.local/bin/uv}"
 seed_start="${PILOT_DIAGNOSTIC_SEED_START:-42}"
@@ -56,9 +56,6 @@ sed -i.bak "s/^lambda_fuse = .*/lambda_fuse = $selected_lambda/" "$temp_config"
 
 if [ -n "${DIAGNOSTIC_RHO:-}" ]; then
 	sed -i.bak "s/^rho = .*/rho = $DIAGNOSTIC_RHO/" "$temp_config"
-fi
-if [ -n "${DIAGNOSTIC_ADAPTIVE_RHO:-}" ]; then
-	sed -i.bak "s/^adaptive_rho = .*/adaptive_rho = $DIAGNOSTIC_ADAPTIVE_RHO/" "$temp_config"
 fi
 if [ -n "${DIAGNOSTIC_NEWTON_STEPS:-}" ]; then
 	sed -i.bak "s/^newton_steps_per_admm = .*/newton_steps_per_admm = $DIAGNOSTIC_NEWTON_STEPS/" "$temp_config"

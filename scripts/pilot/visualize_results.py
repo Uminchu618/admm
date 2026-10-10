@@ -17,7 +17,7 @@ import pandas as pd
 
 
 SCENARIO_ORDER = ["oracle", "fine_grid", "off_grid", "small", "no_change"]
-DEFAULT_PILOT_RUN = "adaptive_rho_normalized_stagnation_escape_newton5"
+DEFAULT_PILOT_RUN = "fixed_rho_newton5"
 SCENARIO_LABELS = {
     "oracle": "Oracle",
     "fine_grid": "Fine-grid",
